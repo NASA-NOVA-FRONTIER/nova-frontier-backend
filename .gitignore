@@ -1,0 +1,282 @@
+# =========================================
+# Python Base
+# =========================================
+__pycache__/
+*.py[cod]
+*$py.class
+*.pyo
+*.pyd
+*.pyc
+*.pdb
+*.so
+*.egg
+*.egg-info/
+*.manifest
+*.spec
+*.sage.py
+*.mo
+*.pot
+dist/
+build/
+eggs/
+parts/
+var/
+sdist/
+develop-eggs/
+lib/
+lib64/
+wheels/
+downloads/
+.eggs/
+share/python-wheels/
+cover/
+MANIFEST
+.installed.cfg
+.pypirc
+cython_debug/
+__pypackages__/
+
+# =========================================
+# Virtual Environments
+# =========================================
+.venv/
+venv/
+env/
+ENV/
+env.bak/
+venv.bak/
+.env
+.env.*
+!.env.example
+**/.venv/
+**/venv/
+.local/
+
+# =========================================
+# Package Managers
+# =========================================
+# pip
+pip-log.txt
+pip-delete-this-directory.txt
+
+# uv
+.uv/
+uv.lock
+
+# pdm
+.pdm.toml
+.pdm-python
+.pdm-build/
+
+# pipenv
+Pipfile.lock
+
+# poetry
+poetry.lock
+
+# =========================================
+# Testing & Coverage
+# =========================================
+.pytest_cache/
+.tox/
+.nox/
+.hypothesis/
+htmlcov/
+.coverage
+.coverage.*
+coverage.xml
+*.cover
+*.py.cover
+*.lcov
+nosetests.xml
+test-results/
+
+# =========================================
+# Type Checkers & Linters
+# =========================================
+.mypy_cache/
+.dmypy.json
+dmypy.json
+.ruff_cache/
+.pytype/
+.pyre/
+ruff.json
+bandit.json
+bandit.sarif
+
+# =========================================
+# IDEs
+# =========================================
+# JetBrains
+.idea/
+*.iml
+*.iws
+*.ipr
+out/
+
+# VS Code
+.vscode/
+*.code-workspace
+
+# Sublime Text
+*.sublime-project
+*.sublime-workspace
+
+# Spyder
+.spyderproject.cfg
+.spyderproject
+.spyproject/
+.spyproject
+
+# Rope
+.ropeproject/
+.ropeproject
+
+# Cursor
+.cursor/
+
+# =========================================
+# Documentation
+# =========================================
+docs/_build/
+/site
+.cache
+
+# IPython / Jupyter
+.ipynb_checkpoints/
+*.ipynb
+profile_default/
+ipython_config.py
+
+# =========================================
+# Operating Systems
+# =========================================
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+._*
+.Spotlight-V100
+.Trashes
+
+# Windows
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+$RECYCLE.BIN/
+
+# Linux
+*~
+.fuse_hidden*
+.directory
+.Trash-*
+
+# =========================================
+# Cloud Platforms
+# =========================================
+# AWS
+.aws/
+.aws-sam/
+
+# =========================================
+# Infrastructure (Terraform / Terragrunt)
+# =========================================
+.terraform/
+**/.terraform/
+**/.terragrunt-cache/
+**/.terraform.lock.hcl
+*.tfstate
+*.tfstate.*
+*.tfvars
+*.tfvars.json
+crash.log
+crash.*.log
+override.tf
+override.tf.json
+*_override.tf
+*_override.tf.json
+backend.tf
+
+# =========================================
+# Secrets & Credentials
+# =========================================
+*.pem
+*.key
+*.p12
+secrets.yaml
+secrets.json
+credentials.json
+
+# =========================================
+# Logs & Temporary Files
+# =========================================
+*.log
+*.tmp
+*.bak
+*.swp
+*.swo
+logs/
+tmp/
+temp/
+
+# =========================================
+# Build Tools
+# =========================================
+.pybuilder/
+target/
+
+# =========================================
+# Framework-Specific
+# =========================================
+# Django
+local_settings.py
+db.sqlite3
+db.sqlite3-journal
+
+# Flask
+instance/
+.webassets-cache
+
+# Scrapy
+.scrapy
+
+# Celery
+celerybeat-schedule
+celerybeat.pid
+
+# =========================================
+# Project-Specific
+# =========================================
+**/demos_config/**/files/
+**/demos_config/**/setup_vector_store.mjs
+**/scripts/
+
+# Redis
+*.rdb
+*.aof
+*.pid
+
+# RabbitMQ
+mnesia/
+rabbitmq/
+rabbitmq-data/
+
+# ActiveMQ
+activemq-data/
+
+# Others
+.abstra/
+tempCodeRunnerFile.py
+
+# Marimo
+marimo/_static/
+marimo/_lsp/
+__marimo__/
+
+# Streamlit
+.streamlit/secrets.toml
+
+# Local agent workspace: plans, specs, worktrees, skills and notes (never part of a PR)
+.superpowers/
+.claude/
+DELETE/
