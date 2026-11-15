@@ -651,11 +651,15 @@ class ExplorationService:
         return stages
 
     async def _queue_position(self, job: ExplorationJob, now: datetime) -> int | None:
+        """How many analyses are ahead: 0 while running or first in line, None once it ended.
+
+        Only queued jobs count: the gateway also reports `queued` while a worker starts, and runs
+        several jobs at once, so a running job is not one this job waits for.
+        """
         if job.status is ExplorationStatus.RUNNING:
             return 0
         if job.status is ExplorationStatus.QUEUED:
-            ahead = await self._repository.count_queued_before(created_at=job.created_at, now=now)
-            return ahead + 1
+            return await self._repository.count_queued_ahead(job=job, now=now)
         return None
 
     @staticmethod

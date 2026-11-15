@@ -46,8 +46,8 @@ class JobRepository(Protocol):
 
     async def count_active(self, now: datetime) -> int: ...
 
-    async def count_queued_before(self, created_at: datetime, now: datetime) -> int:
-        """Queued jobs still inside their deadline that were created before `created_at`."""
+    async def count_queued_ahead(self, job: ExplorationJob, now: datetime) -> int:
+        """Queued jobs still inside their deadline that were created before `job`."""
         ...
 
     async def find_fresh(self, cache_key: str, newer_than: datetime) -> ExplorationJob | None: ...

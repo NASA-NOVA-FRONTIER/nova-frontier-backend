@@ -1,7 +1,7 @@
 from datetime import UTC, datetime
 from typing import Any, cast
 
-from sqlalchemy import CursorResult, func, select, update
+from sqlalchemy import CursorResult, and_, func, or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from nisar_hazard_watch.adapters.db.models import ExplorationRecord
@@ -89,11 +89,18 @@ class SqlJobRepository:
         async with self._session_factory() as session:
             return int((await session.execute(statement)).scalar_one())
 
-    async def count_queued_before(self, created_at: datetime, now: datetime) -> int:
+    async def count_queued_ahead(self, job: ExplorationJob, now: datetime) -> int:
         statement = select(func.count()).where(
             ExplorationRecord.status == ExplorationStatus.QUEUED.value,
-            ExplorationRecord.created_at < created_at,
             ExplorationRecord.deadline_at > now,
+            # Same timestamp: the smaller id goes first, so the order is always total.
+            or_(
+                ExplorationRecord.created_at < job.created_at,
+                and_(
+                    ExplorationRecord.created_at == job.created_at,
+                    ExplorationRecord.id < job.id,
+                ),
+            ),
         )
         async with self._session_factory() as session:
             return int((await session.execute(statement)).scalar_one())

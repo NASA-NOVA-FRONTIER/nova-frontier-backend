@@ -258,7 +258,7 @@ tests/          unit/ (mirrors src), integration/ (Postgres), live/ (NASA)
 
 - `stages` starts with `planning` (searching the catalog, done before the job is handed over). While the job is active, one `processing` entry stands for the other three steps, because the gateway reports only `queued` or `running`, with no sub-stage. Once it ends, `reading`, `analysing` and `rendering` arrive with their seconds.
 - `progress.scenesRead` is null until the result arrives, for the same reason; `scenesTotal` is known from the plan.
-- `queuePosition` is the job's place in line while `queued` (1 starts next), 0 while `running`, and null once it ends.
+- `queuePosition` is how many analyses are ahead of this one: while `queued`, the other queued jobs created before it (ties broken by id); 0 while `running`; null once it ends. Running jobs don't count, because the gateway runs several at once and also reports `queued` while a worker starts. Another job's status is only refreshed when someone polls it, so an abandoned queued job counts as ahead until its deadline.
 
 **Reason codes** (`constants/errors.py`). Errors are `application/problem+json`; the codes marked "in the job" arrive inside a `200` exploration as `error.reasonCode`.
 
