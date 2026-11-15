@@ -94,14 +94,15 @@ Payload fields are camelCase.
 ```
 src/nisar_hazard_watch/
   api/          app factory, composition root, middlewares (request id, unexpected errors), error handlers, routes/<resource>/
-  services/     use cases: HealthService, ScenePlanner (and scene_selection), ExplorationService, EtaEstimator, lens_catalog
-  ports/        interfaces the services depend on (DependencyProbe, SarCatalog, AnalysisRunner, JobRepository, PrecomputedCases)
-  adapters/     implementations: db/ (jobs), nasa/ (CMR health), asf/ (scene catalog), geocoding/ (Nominatim), runners/ (ML gateway, in-process), cases/, credentials/
+  services/     use cases: HealthService, ScenePlanner (and scene_selection), ExplorationService, EtaEstimator, CaseService, PlaceSearchService, lens_catalog
+  hazards/      per-hazard logic: wildfire/ (FIRMS fire context, assessment window), earthquake/ (InSAR pairs service)
+  ports/        interfaces the services depend on (DependencyProbe, SarCatalog, AnalysisRunner, JobRepository, PrecomputedCases, CaseCatalog, InsarPairCatalog, Geocoder, FireContextProvider, FireDetectionSource)
+  adapters/     implementations: db/ (jobs), nasa/ (CMR health), asf/ (scene catalog), geocoding/ (Nominatim), runners/ (ML gateway, in-process), gateway/ (known cases, InSAR pairs), firms/ (active-fire detections), cases/, credentials/
   models/       camelCase DTOs (CamelModel), problem details, health
   constants/    routes, headers, reason codes, enums: no magic strings
   config/       settings (pydantic-settings)
   exceptions/   AppError and subclasses
-  utils/        logging, request context, database url, timing, geometry (areas of interest)
+  utils/        logging, request context, database url, timing, geometry (areas of interest), rate limiter, TTL cache, throttle, gateway layers, GUNW names
 migrations/     Alembic (async): 0001 baseline, 0002 explorations
 tests/          unit/ (mirrors src), integration/ (Postgres), live/ (NASA)
 ```
