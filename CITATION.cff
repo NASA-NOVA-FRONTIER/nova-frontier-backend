@@ -1,0 +1,25 @@
+cff-version: 1.2.0
+message: "If you use this software, please cite it as below."
+title: "NISAR Hazard Watch — Backend"
+abstract: "FastAPI backend that plans NISAR L-band scenes from the ASF catalog, runs diagnostic radar lenses on an ML gateway and serves the results with their limitations."
+type: software
+authors:
+  - given-names: "Jesús Alfonso"
+    family-names: "Pinzón Vega"
+  - given-names: "Cristian Santiago"
+    family-names: "Pedraza Rodríguez"
+  - given-names: "Andersson David"
+    family-names: "Sánchez Méndez"
+  - given-names: "David Stiven"
+    family-names: "Sarria Arcila"
+  - given-names: "Daniel Felipe"
+    family-names: "Martínez Hernández"
+  - given-names: "Katheryn Sofía"
+    family-names: "Guasca Chavarro"
+repository-code: "https://github.com/NASA-NOVA-FRONTIER/nova-frontier-backend"
+url: "https://nova-frontier-frontend.vercel.app"
+license: Apache-2.0
+keywords:
+  - NISAR
+  - synthetic aperture radar
+  - NASA Space Apps Challenge 2026

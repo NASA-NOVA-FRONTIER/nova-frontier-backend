@@ -1,6 +1,74 @@
+<div align="center">
+
+<img src=".github/assets/hero.jpg" alt="The NISAR Hazard Watch web app that this API serves: its landing page, with the headline &quot;Earth, without the clouds.&quot; over a 3D Earth and the Open the explorer and The Chenab flood buttons" width="100%">
+
 # NISAR Hazard Watch — Backend
 
-FastAPI backend for **NISAR Hazard Watch**, the NASA Space Apps 2026 project that reads NISAR radar to show surface change after earthquakes, fires, floods and forest loss. The backend plans each exploration from the public ASF catalog, orchestrates the ML workers on Modal and serves the results to the frontend. This repository currently holds the **foundation**: the app factory, configuration, one error shape, structured logs, the health endpoints, Alembic, Docker, CI and the Railway deployment. The exploration API comes next.
+**The API behind the radar evidence explorer.**
+
+A FastAPI service that plans which NISAR L-band scenes to read from the public ASF catalog, runs the
+analysis on the ML gateway on Modal and serves each result with its layers and its limitations.
+Results are diagnostic evidence: no forecasts, no probabilities, no causes.
+
+[![API docs](https://img.shields.io/badge/api%20docs-swagger%20ui-c9b48b?style=for-the-badge&labelColor=04070e)](https://nova-frontier-backend-main.up.railway.app/docs)
+[![Live app](https://img.shields.io/badge/live%20app-open%20the%20explorer-c9b48b?style=for-the-badge&labelColor=04070e)](https://nova-frontier-frontend.vercel.app)
+
+[![CI](https://github.com/NASA-NOVA-FRONTIER/nova-frontier-backend/actions/workflows/ci.yml/badge.svg)](https://github.com/NASA-NOVA-FRONTIER/nova-frontier-backend/actions/workflows/ci.yml)
+![Python](https://img.shields.io/badge/Python-3.13-3776ab?logo=python&logoColor=white)
+![FastAPI](https://img.shields.io/badge/FastAPI-async-009688?logo=fastapi&logoColor=white)
+![uv](https://img.shields.io/badge/uv-locked-de5fe9?logo=uv&logoColor=white)
+![PostgreSQL](https://img.shields.io/badge/PostgreSQL-17-4169e1?logo=postgresql&logoColor=white)
+![Railway](https://img.shields.io/badge/Railway-deployed-0b0d0e?logo=railway&logoColor=white)
+![Modal](https://img.shields.io/badge/Modal-ML%20gateway-7fee64)
+![NASA Space Apps 2026](https://img.shields.io/badge/NASA%20Space%20Apps-2026-0b3d91)
+
+**[Frontend](https://github.com/NASA-NOVA-FRONTIER/nova-frontier-frontend)** ·
+**[Model](https://github.com/NASA-NOVA-FRONTIER/nova-frontier-model)** ·
+**[Live demo](https://nova-frontier-frontend.vercel.app)**
+
+</div>
+
+For a point or a drawn area it plans the scenes to read from the public ASF catalog, sends that plan to the ML gateway on Modal (`nova-frontier-model`), tracks the job and serves the result with its layers, `limitations` and `scientificStatus: "diagnostic"`. It also lists the cases measured ahead of time, the NISAR interferometric pairs over a point, the lenses and place search results for the globe. A `wildfire` answer adds NASA FIRMS active-fire detections as separate context.
+
+| Method | Path (under `/api/v1`) | Answers |
+|---|---|---|
+| `POST`, `GET`, `DELETE` | `/explorations`, `/explorations/{id}` | Start, follow or cancel an exploration of an area with one lens |
+| `POST` | `/explorations/{id}/analysis` | Start or reuse a regional analysis of the exploration's scene series |
+| `GET` | `/explorations/{id}/layers/{layerId}`, `/explorations/{id}/assets/{name}` | Redirect to a layer image or a published file of the job |
+| `GET` | `/coverage` | Which scenes would be read for a point, without running anything |
+| `GET` | `/cases`, `/cases/{id}`, `/cases/{id}/layers/{layerId}` | The known cases measured ahead of time, one case's evidence, its layer images |
+| `GET` | `/insar/pairs` | NISAR L-band interferometric pairs over a point, newest first |
+| `GET` | `/lenses` | The lenses, what each one shows and how many dates it needs |
+| `GET` | `/places` | Place search for the globe |
+| `GET` | `/health`, `/health/live` | Dependency report and liveness check |
+
+Details of each endpoint are in [API](#api).
+
+## Contents
+
+- [Architecture](#architecture)
+- [Quickstart](#quickstart)
+- [Configuration](#configuration)
+- [API](#api)
+- [Example requests](#example-requests)
+- [Project layout](#project-layout)
+- [Architecture decisions](#architecture-decisions)
+- [Scene planning (SAR core)](#scene-planning-sar-core)
+- [Exploration flow](#exploration-flow)
+- [What we don't claim](#what-we-dont-claim)
+- [Data sources and citations](#data-sources-and-citations)
+- [Testing](#testing) · [Quality](#quality) · [CI](#ci) · [Deployment](#deployment)
+- [NASA Space Apps 2026](#nasa-space-apps-2026)
+- [How to cite this project](#how-to-cite-this-project)
+- [License](#license)
+
+## Architecture
+
+How a question travels: the browser calls this backend on Railway, which plans the scenes and hands the job to the ML gateway on Modal; the gateway reads NISAR data from NASA archives and the radar layers go back to the globe.
+
+<img src=".github/assets/architecture.png" alt="NISAR Hazard Watch, how a question travels: the browser calls this backend on Railway, which plans scenes from ASF, adds FIRMS fire detections and Nominatim places, keeps jobs in PostgreSQL and posts the job to the ML gateway on Modal; the gateway reads NISAR data from NASA and the radar layers go back to the globe" width="100%">
+
+<sub>Diagram source: the frontend repo, <code>docs/architecture/</code> (render with <code>pnpm diagram</code>).</sub>
 
 ## Quickstart
 
@@ -75,19 +143,69 @@ Every response carries `X-Request-ID` (a safe incoming value is kept, otherwise 
 
 Payload fields are camelCase.
 
+## Example requests
+
+Read-only calls against the public deployment (responses captured on 2026-11-15, trimmed).
+
+```bash
+curl -s https://nova-frontier-backend-main.up.railway.app/api/v1/lenses
+```
+
+```json
+[
+  {
+    "id": "flood_wetland",
+    "title": "Flood and wetland",
+    "description": "Dual-polarization darkening and brightening of the latest scene against the area's own earlier measurements, diagnostic of open-water and wet-surface change.",
+    "opticalEvidence": true,
+    "minimumDates": 4
+  },
+  …
+  {
+    "id": "insar",
+    "title": "Ground motion (InSAR pair)",
+    "opticalEvidence": false,
+    "minimumDates": 2,
+    …
+  }
+]
+```
+
+The scene plan for Qadirabad (Chenab river, Pakistan), without running anything:
+
+```bash
+curl -s "https://nova-frontier-backend-main.up.railway.app/api/v1/coverage?lon=73.713&lat=32.329"
+```
+
+```json
+{
+  "plan": {
+    "status": "ready",
+    "seriesKey": "084_A_018_4005_DHDH",
+    "dates": ["2026-07-14", "2026-08-19", "2026-09-12", "2026-10-18", "2026-11-11"],
+    "maturityMixed": true,
+    "notes": []
+  },
+  "areaKm2": 104.904,
+  "warnings": [],
+  "precomputedCase": null
+}
+```
+
 ## Project layout
 
 ```
 src/nisar_hazard_watch/
   api/          app factory, composition root, middlewares (request id, unexpected errors), error handlers, routes/<resource>/
-  services/     use cases: HealthService, ScenePlanner (and scene_selection), ExplorationService, EtaEstimator, lens_catalog
-  ports/        interfaces the services depend on (DependencyProbe, SarCatalog, AnalysisRunner, JobRepository, PrecomputedCases)
-  adapters/     implementations: db/ (jobs), nasa/ (CMR health), asf/ (scene catalog), geocoding/ (Nominatim), runners/ (ML gateway, in-process), cases/, credentials/
+  services/     use cases: HealthService, ScenePlanner (and scene_selection), ExplorationService, EtaEstimator, CaseService, PlaceSearchService, lens_catalog
+  hazards/      per-hazard logic: wildfire/ (FIRMS fire context, assessment window), earthquake/ (InSAR pairs service)
+  ports/        interfaces the services depend on (DependencyProbe, SarCatalog, AnalysisRunner, JobRepository, PrecomputedCases, CaseCatalog, InsarPairCatalog, Geocoder, FireContextProvider, FireDetectionSource)
+  adapters/     implementations: db/ (jobs), nasa/ (CMR health), asf/ (scene catalog), geocoding/ (Nominatim), runners/ (ML gateway, in-process), gateway/ (known cases, InSAR pairs), firms/ (active-fire detections), cases/, credentials/
   models/       camelCase DTOs (CamelModel), problem details, health
   constants/    routes, headers, reason codes, enums: no magic strings
   config/       settings (pydantic-settings)
   exceptions/   AppError and subclasses
-  utils/        logging, request context, database url, timing, geometry (areas of interest)
+  utils/        logging, request context, database url, timing, geometry (areas of interest), rate limiter, TTL cache, throttle, gateway layers, GUNW names
 migrations/     Alembic (async): 0001 baseline, 0002 explorations
 tests/          unit/ (mirrors src), integration/ (Postgres), live/ (NASA)
 ```
@@ -100,13 +218,100 @@ tests/          unit/ (mirrors src), integration/ (Postgres), live/ (NASA)
 4. Put logic in `services/`, depend on a `ports/` interface and implement it in `adapters/`.
 5. Write DTOs as `CamelModel` subclasses and the tests mirroring the source path.
 
+## Architecture decisions
+
+- **Hexagonal: ports and adapters.** Services depend on `Protocol` interfaces in `ports/`; concrete adapters are wired only in `api/composition.py`. That is how `RUNNER=inProcess` swaps the ML gateway for a synthetic, demo-labelled runner, and how the unit tests run on fakes with no network.
+- **Heavy reads on Modal, a small API on Railway.** Reading the planned NISAR windows is the slow part (stage budgets in `constants/explorations.py`: 105 s reading against 15 s analysing and 15 s rendering), so it runs on the `nova-frontier-model` gateway's workers, which keep a chip cache on a Modal Volume. The API only plans, queues and relays, and refuses new work with `503 QUEUE_FULL` when `MAX_ACTIVE_EXPLORATIONS` are running or the gateway is busy.
+- **Asynchronous jobs with polling.** An exploration takes minutes, so `POST` answers `202` with a job and the client polls `GET /explorations/{id}`, which refreshes the job from the gateway; `etaSeconds` comes from the p80 of recent comparable runs (`EtaEstimator`).
+- **PostgreSQL as the job store and a 24 h result cache.** Jobs live in the database, not in memory, so any poll sees the same state. `transition` only updates rows that are still active, so a cancel and a late poll cannot overwrite each other. A finished job with the same lens, area and granules is reused for `EXPLORATION_CACHE_TTL_SECONDS` (86,400 s).
+- **One error shape.** Every error is `application/problem+json` with a stable `reasonCode` and the `requestId`; the frontend maps the code to its own message, and server-side details of a 500 are never echoed.
+
 ## Scene planning (SAR core)
 
-`ScenePlanner` turns an area of interest and "now" into the exact scenes to read. The area comes from `aoi_from_point` (the 10.24 km square in the local UTM zone) or `aoi_from_geojson` (a drawn polygon: closed ring, up to 100 vertices, repaired with `buffer(0)`, split at ±180°, measured on the ellipsoid and capped by native pixels: about 110 km² is the ideal, 400 km² the hard limit). `AsfCatalog` queries the public ASF SearchAPI once for the last five months without maturity or configuration filters (maturity is read from the product URL) and fails loudly instead of returning a truncated list. The planner keeps one scene per acquisition (VALIDATED over PROVISIONAL over BETA over urgent response, then CRID and version), picks one series, the ML service's key `track_direction_frame_bandwidthCode_mode` (a frame can mix 2005 and 4005 bandwidth codes or DHDH and QPDH modes, which have incompatible grids; full coverage, dual-pol, most dates, newest) and walks back from the newest scene in steps of about 30 days (± 6) up to five images. Fewer than four usable dates is an `insufficientHistory` plan, no scene at all is `noCoverage`, and `maturityMixed` tells the UI when the series mixes maturities.
+`ScenePlanner` turns an area of interest and "now" into the exact scenes to read.
+
+| # | Step | Rule | Why |
+|---|---|---|---|
+| 1 | Area | A point becomes the 10.24 km square in the local UTM zone (`aoi_from_point`). A drawn polygon (`aoi_from_geojson`) needs a closed ring and at most 100 vertices; it is repaired with `buffer(0)`, split at ±180° and measured on the ellipsoid | One fixed square gives every point the same 1024 × 1024 window at 10 m; repairing and splitting keeps hand-drawn and dateline shapes valid |
+| 2 | Size limit | Capped by native pixels: about 110 km² is the ideal, 400 km² the hard limit (`AREA_TOO_LARGE`) | The analysis reads a window of native pixels, so the cost grows with the area |
+| 3 | Catalog query | One ASF SearchAPI query for the last five months (152 days), with no maturity or configuration filter; maturity is read from the product URL | Seeing every product lets the planner choose; the query fails loudly instead of returning a truncated list |
+| 4 | One scene per acquisition | VALIDATED over PROVISIONAL over BETA over urgent response, then CRID and version | The same pass can be published several times; keep the most mature copy |
+| 5 | One series | Group by the ML service's key `track_direction_frame_bandwidthCode_mode`; prefer full coverage (≥ 95 %), dual-pol, most dates, newest | A frame can mix 2005 and 4005 bandwidth codes or DHDH and QPDH modes, whose grids are incompatible |
+| 6 | Dates | Walk back from the newest scene in steps of about 30 days (± 6), up to five images | Evenly spaced dates give the lens a baseline and a target |
+| 7 | Verdict on the plan | Fewer than four usable dates is `insufficientHistory`, no scene at all is `noCoverage`; `maturityMixed` tells the UI when the series mixes maturities | The lenses need at least three earlier dates plus the target; the UI must say when maturities differ |
 
 ## Exploration flow
 
-`POST /api/v1/explorations` validates the area (`INVALID_GEOMETRY`, `AREA_TOO_LARGE`), refuses `source: "S"` (`SOURCE_NOT_AVAILABLE`: S-band will arrive as a precomputed layer), plans the scenes with `ScenePlanner`, and answers from the cache when the same lens, area and granules finished in the last day. Otherwise it checks capacity (`QUEUE_FULL`), hands the plan to the runner and stores the job. The default runner posts it to the Modal gateway of `nova-frontier-model`, which reads the planned windows (up to 10.24 km at 10 m), runs the lens and serves the layers; polling `GET /explorations/{id}` refreshes the job from the gateway. Failures are explicit: no scenes is a final `noData` answer with `NO_COVERAGE` or `INSUFFICIENT_HISTORY`; a catalog outage is `502 UPSTREAM_CATALOG_ERROR` (and names a precomputed case when one matches); an exploration past the deadline is `partial` with `TIMEOUT_PARTIAL`. Every result carries `limitations[]`, `scientificStatus: "diagnostic"` and `isDemo`; an area wider than the analysed window says so in `limitations` and `quality.windowTruncated`. A `wildfire` answer also carries `result.fireContext`, kept apart from the radar `lens`: NASA FIRMS VIIRS active-fire detections (SNPP and NOAA-20, archive and near real time, de-duplicated) inside the area between the last baseline pass and the target pass, low-confidence ones counted separately; it is `available`, `unavailable` (FIRMS failed or was slow) or `notConfigured`, and never reports a cause or a burned area. It lives in `hazards/wildfire/`. The `insar` lens takes a pair chosen from `GET /api/v1/insar/pairs` instead of a GCOV scene plan (the planner is skipped): the backend reads the pair's two days from its granule name, sends `insar-pair` to the gateway and returns `result.insar` (median coherence, coherent and phase cells, coherence and wrapped phase at the point) with two layers, coherence and wrapped phase (cyclic palette). The phase is wrapped and not corrected for troposphere or ionosphere, so `losDisplacementCm` is always `null` and every answer says so. Measured on 2026-11-12 (Kumamoto, track 24, 2026-07-21 to 2026-08-14): 50 s, 62,500 coherent cells in the 5 km window, 39,584 with phase at the 0.35 threshold. Measured on 2026-11-12 (Qadirabad, five scenes, 1024 × 1024 cells): about 35 s of analysis plus rendering once warm, 47 s from a cold start.
+`POST /api/v1/explorations` validates the area, refuses `source: "S"` (S-band will arrive as a precomputed layer), plans the scenes, answers from the cache when the same lens, area and granules finished in the last day, checks capacity, hands the plan to the runner and stores the job. The default runner posts it to the Modal gateway of `nova-frontier-model`, which reads the planned windows (up to 10.24 km at 10 m), runs the lens and serves the layers; polling `GET /explorations/{id}` refreshes the job from the gateway.
+
+**States** (`ExplorationStatus`):
+
+- `queued` → the job was handed to the gateway and waits there (also the state the gateway reports while it queues).
+- `running` → the gateway reports the job is processing.
+- `succeeded` → the gateway answered `complete`.
+- `partial` → the gateway answered `partial`, or `complete` with a lens that had `insufficient_data`, or the deadline (`EXPLORATION_DEADLINE_SECONDS`) passed while the job was still active (`TIMEOUT_PARTIAL`).
+- `noData` → the plan had no usable scenes (`NO_COVERAGE` or `INSUFFICIENT_HISTORY`, final at once), or the gateway found no usable measurements (`NO_COVERAGE`).
+- `failed` → the gateway reported a failure, an unknown status or an empty result (`ANALYSIS_FAILED`).
+- `cancelled` → `DELETE /explorations/{id}` on an active job (`CANCELLED`).
+
+**Reason codes** (`constants/errors.py`). Errors are `application/problem+json`; the codes marked "in the job" arrive inside a `200` exploration as `error.reasonCode`.
+
+| `reasonCode` | HTTP | What the user sees |
+|---|---|---|
+| `INVALID_REQUEST` | 422 | The request body or query did not validate (also a bad InSAR pair) |
+| `INVALID_GEOMETRY` | 422 | The drawn area is not a valid Point, Polygon or MultiPolygon |
+| `AREA_TOO_LARGE` | 422 | The area is above the 400 km² limit |
+| `SOURCE_NOT_AVAILABLE` | 422 | S-band was asked for; only L-band runs on demand |
+| `INVALID_QUERY` | 422 | The place search text is too short or too long |
+| `NOT_FOUND` | 404 | Unknown path or exploration |
+| `CASE_NOT_FOUND` | 404 | Unknown case id |
+| `METHOD_NOT_ALLOWED` | 405 | Wrong method for the path |
+| `PAYLOAD_TOO_LARGE` | 413 | The request body is too large |
+| `RATE_LIMITED` | 429 | More than `RATE_LIMIT_PER_MINUTE` requests from one client |
+| `UPSTREAM_CATALOG_ERROR` | 502 | The ASF catalog failed; names a precomputed case when one matches |
+| `UPSTREAM_ML_ERROR` | 502 | The ML gateway did not answer |
+| `UPSTREAM_GEOCODER_ERROR` | 502 | Place search provider failed |
+| `CASES_UNAVAILABLE` | 502 | No copy of the known cases and the gateway failed |
+| `QUEUE_FULL` | 503 | `MAX_ACTIVE_EXPLORATIONS` are running; retry later |
+| `INTERNAL_ERROR` | 500 | Unexpected error; details are never echoed |
+| `NO_COVERAGE` | in the job | `noData`: no scene covers the area, or no usable measurement |
+| `INSUFFICIENT_HISTORY` | in the job | `noData`: fewer than four usable dates |
+| `TIMEOUT_PARTIAL` | in the job | `partial`: the deadline passed; the planned scenes are listed |
+| `ANALYSIS_FAILED` | in the job | `failed`, with a plain detail from the gateway's error code |
+| `CANCELLED` | in the job | `cancelled` |
+
+**Every result** carries `limitations[]`, `scientificStatus: "diagnostic"` and `isDemo`; an area wider than the analysed window says so in `limitations` and `quality.windowTruncated`.
+
+**Wildfire** answers also carry `result.fireContext`, kept apart from the radar `lens` (it lives in `hazards/wildfire/`): NASA FIRMS VIIRS active-fire detections (SNPP and NOAA-20, archive and near real time, de-duplicated) inside the area between the last baseline pass and the target pass, low-confidence ones counted separately. It is `available`, `unavailable` (FIRMS failed or was slow) or `notConfigured`, and never reports a cause or a burned area.
+
+**InSAR** (`insar` lens) takes a pair chosen from `GET /api/v1/insar/pairs` instead of a GCOV scene plan (the planner is skipped): the backend reads the pair's two days from its granule name, sends `insar-pair` to the gateway and returns `result.insar` (median coherence, coherent and phase cells, coherence and wrapped phase at the point) with two layers, coherence and wrapped phase (cyclic palette). The phase is wrapped and not corrected for troposphere or ionosphere, so `losDisplacementCm` is always `null` and every answer says so.
+
+**Measured timings:**
+
+| Case | Date | Input | Cells / window | Time |
+|---|---|---|---|---|
+| Kumamoto, InSAR pair (track 24, 2026-07-21 to 2026-08-14) | 2026-11-12 | One GUNW pair | 62,500 coherent cells in the 5 km window; 39,584 with phase at the 0.35 threshold | 50 s |
+| Qadirabad, GCOV lens | 2026-11-12 | Five scenes | 1024 × 1024 cells | About 35 s of analysis plus rendering once warm; 47 s from a cold start |
+
+## What we don't claim
+
+| We never report | Why, as the code enforces it |
+|---|---|
+| Hectares or any burned, flooded or affected area | Every exploration carries the limitation "No forecast, probability, cause, area in hectares or displacement is reported." (`constants/explorations.py`); case evidence keys containing `area`, `hectares`, `km2`, `flooded`, `inundation` and similar words are never relayed (`FORBIDDEN_EVIDENCE_WORDS`) |
+| Displacement in cm or mm | The InSAR phase is wrapped and not corrected for troposphere or ionosphere, so `losDisplacementCm` is typed `None` and is always `null` (`models/insar_summary.py`, `INSAR_LIMITATIONS`) |
+| Probabilities | Results are `scientificStatus: "diagnostic"` (`SCIENTIFIC_STATUS`): diagnostic evidence from measured backscatter, "not a validated classifier" |
+| Causes | The wildfire limitation says a radar change over burnt land "does not establish a fire as the cause"; FIRMS detections are kept apart from the radar verdict and "no burned area is reported" (`constants/fire_context.py`) |
+| Forecasts | Every answer compares a measured target pass with earlier measured passes; no field or service predicts a future state, and the limitation says so |
+
+## Data sources and citations
+
+| Product | Provider | Used by | Terms | How to cite |
+|---|---|---|---|---|
+| NISAR L2 GCOV (`NISAR_L2_GCOV_V1`, `_PROVISIONAL_V1`, `_BETA_V1`, `UR_L2_L_GCOV`) and L2 GUNW | NASA-ISRO NISAR, archived by the ASF DAAC | Scene plan (ASF SearchAPI) and the ML gateway's reads | NASA mission data are CC0 unless a product states otherwise; "there are no restrictions on the use of these data" ([NASA data use guidance](https://www.earthdata.nasa.gov/engage/open-data-services-software-policies/data-use-guidance)) | "NISAR follows NASA's standard Data Use and Citation Guidance" ([ASF NISAR docs](https://nisar-docs.asf.alaska.edu/data-use-citation-guidance/)): cite each dataset in the text and in the reference list, and acknowledge NASA as the source |
+| NASA CMR (Common Metadata Repository) | NASA Earthdata | `/api/v1/health` probe; granule search on the ML gateway | As above | As above |
+| OPERA DSWx-HLS (`OPERA_L3_DSWX-HLS_V1`) | NASA JPL OPERA, archived by PO.DAAC | The ML gateway's optical evidence (flood lens) | See the [PO.DAAC dataset page](https://podaac.jpl.nasa.gov/dataset/OPERA_L3_DSWX-HLS_V1) | Use the suggested citation on the [PO.DAAC dataset page](https://podaac.jpl.nasa.gov/dataset/OPERA_L3_DSWX-HLS_V1) |
+| NASA FIRMS VIIRS 375 m active fires (Suomi NPP and NOAA-20, standard and near real time) | NASA LANCE / ESDIS | Wildfire `fireContext` | Free MAP_KEY; NASA data use guidance applies | "We acknowledge the use of data and/or imagery from NASA's Fire Information for Resource Management System (FIRMS), part of NASA's Land, Atmosphere Near real-time Capability for Earth observations (LANCE) and NASA's Earth Science Data and Information System (ESDIS)." ([Earthdata FIRMS](https://www.earthdata.nasa.gov/learn/find-data/near-real-time/firms)). Algorithm: Schroeder et al. (2014), doi:[10.1016/j.rse.2013.12.008](https://doi.org/10.1016/j.rse.2013.12.008) |
+| OpenStreetMap Nominatim | OpenStreetMap Foundation | `GET /api/v1/places` | ODbL ([OSM copyright](https://www.openstreetmap.org/copyright)); [usage policy](https://operations.osmfoundation.org/policies/nominatim/): "an absolute maximum of 1 request per second", an identifying User-Agent, "Results must be cached on your side", no client-side autocomplete | "© OpenStreetMap contributors" (returned as `attribution` in every places answer). The backend keeps the policy: one request per 1.1 s, a User-Agent naming this repository, a 24 h cache, search on submit only |
 
 ## Testing
 
@@ -131,6 +336,36 @@ uv run pre-commit install
 ## Deployment
 
 Railway builds the `Dockerfile`, runs `alembic upgrade head` before each deploy (`railway.toml`) and health-checks `/api/v1/health/live`. Variables: `DATABASE_URL` (reference of the Postgres service), `CORS_ALLOWED_ORIGINS`, `ENVIRONMENT=production`, `LOG_LEVEL`. **`main` is production**: change it only through reviewed pull requests with green CI.
+
+## NASA Space Apps 2026
+
+**Challenge:** [Dancing with the SARs](https://www.spaceappschallenge.org/2026/challenges/dancing-with-the-sars/). It asks for an interactive application that uses NISAR radar data to track and show one or more kinds of surface change around the world.
+
+**Demo:** the live app at [nova-frontier-frontend.vercel.app](https://nova-frontier-frontend.vercel.app), backed by this API ([Swagger UI](https://nova-frontier-backend-main.up.railway.app/docs)).
+
+**Team Nova Frontier:**
+
+| Name | Role | Built |
+|---|---|---|
+| [Jesús Alfonso Pinzón Vega](https://github.com/JAPV-X2612) | Architect · team lead | Backend API and system design |
+| [Cristian Santiago Pedraza Rodríguez](https://github.com/cris-eci) | Front end · design | Landing, explorer, method and the design system |
+| [Andersson David Sánchez Méndez](https://github.com/AnderssonProgramming) | Software developer | Landslide hazard module (in progress) |
+| [David Stiven Sarria Arcila](https://github.com/DASarria) | Data pipeline · wildfires | NISAC_Data_Lab: the ASF data pipeline and the response-time lab |
+| [Daniel Felipe Martínez Hernández](https://github.com/Ch0comilo) | Machine learning · radar science | nova-frontier-model and NISAR-Models |
+| [Katheryn Sofía Guasca Chavarro](https://github.com/KillerZeus666) | Front-end developer | Flood analysis interface, event timeline and data visualizations |
+
+**Use of AI:** code in this repository was written with help from Claude Code (Anthropic), under the conventions in [`CLAUDE.md`](CLAUDE.md), and reviewed by the team through pull requests. The scientific numbers (cell counts, coherence, timings) come from measured runs of the radar pipeline in [nova-frontier-model](https://github.com/NASA-NOVA-FRONTIER/nova-frontier-model) on real NISAR data, not from an AI model.
+
+**Acknowledgements:** NASA and ISRO for the NISAR mission and its open data; the Alaska Satellite Facility DAAC, which archives and serves the NISAR products; NASA LANCE / ESDIS for FIRMS; NASA JPL OPERA and PO.DAAC; the OpenStreetMap contributors; and the organisers of the NASA Space Apps local event in Chía, Colombia.
+
+## How to cite this project
+
+```text
+Nova Frontier (2026). NISAR Hazard Watch — Backend. NASA Space Apps Challenge 2026.
+https://github.com/NASA-NOVA-FRONTIER/nova-frontier-backend
+```
+
+GitHub's "Cite this repository" button reads [`CITATION.cff`](CITATION.cff). Cite the data products above as well.
 
 ## License
 

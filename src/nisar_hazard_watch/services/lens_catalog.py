@@ -16,8 +16,10 @@ _DESCRIPTIONS = {
     ),
     Lens.WILDFIRE: (
         "Wildfire",
-        "Cross-polarization decline history against a three-date baseline, diagnostic of burn-"
-        "related change; fire context is not provided.",
+        "Cross-polarization decline of the latest scene against the area's earlier dates, "
+        "diagnostic of burn-related change, with independent NASA FIRMS VIIRS active-fire "
+        "detections inside the area between the last two radar passes (when configured); no "
+        "cause or burned area is reported.",
     ),
     Lens.AGRICULTURE: (
         "Agriculture",
