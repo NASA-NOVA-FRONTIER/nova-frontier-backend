@@ -95,6 +95,31 @@ async def test_a_new_exploration_starts_with_a_plan_an_eta_and_nothing_final(
     assert len(runner.submissions) == 1
 
 
+async def test_a_queued_exploration_reports_its_place_in_line_then_zero_then_nothing(
+    make_service: Factory, runner: ScriptedRunner, clock: ManualClock
+) -> None:
+    # Arrange
+    service = make_service()
+    queued = RunnerTicket(run_id="run-1", state=RunnerState.QUEUED)
+    runner.submit_ticket = queued
+    runner.poll_ticket = queued
+    first, _ = await service.create(request=_request())
+    clock.advance(1)
+    second, _ = await service.create(request=_request(lens=Lens.WILDFIRE))
+
+    # Act
+    runner.poll_ticket = RunnerTicket(run_id="run-1", state=RunnerState.RUNNING)
+    running = await service.get(exploration_id=first.id)
+    _succeeded(runner)
+    done = await service.get(exploration_id=first.id)
+
+    # Assert
+    assert (first.status, first.queue_position) == (ExplorationStatus.QUEUED, 1)
+    assert (second.status, second.queue_position) == (ExplorationStatus.QUEUED, 2)
+    assert running.queue_position == 0
+    assert done.queue_position is None
+
+
 async def test_the_remaining_time_counts_down_with_the_clock(
     make_service: Factory, clock: ManualClock
 ) -> None:

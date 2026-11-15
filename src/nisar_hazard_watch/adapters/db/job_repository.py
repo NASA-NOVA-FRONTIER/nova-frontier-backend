@@ -89,6 +89,15 @@ class SqlJobRepository:
         async with self._session_factory() as session:
             return int((await session.execute(statement)).scalar_one())
 
+    async def count_queued_before(self, created_at: datetime, now: datetime) -> int:
+        statement = select(func.count()).where(
+            ExplorationRecord.status == ExplorationStatus.QUEUED.value,
+            ExplorationRecord.created_at < created_at,
+            ExplorationRecord.deadline_at > now,
+        )
+        async with self._session_factory() as session:
+            return int((await session.execute(statement)).scalar_one())
+
     async def find_fresh(self, cache_key: str, newer_than: datetime) -> ExplorationJob | None:
         statement = (
             select(ExplorationRecord)
