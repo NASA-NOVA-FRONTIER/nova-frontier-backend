@@ -356,6 +356,30 @@ def test_coverage_describes_the_plan_for_a_point(start_api: Callable[..., TestCl
     assert invalid.status_code == 422
 
 
+def test_coverage_estimates_the_lens_it_is_asked_about(
+    start_api: Callable[..., TestClient],
+) -> None:
+    # Arrange
+    client = start_api()
+    point = {"lon": QADIRABAD_LON, "lat": QADIRABAD_LAT}
+
+    # Act
+    default = client.get(url="/api/v1/coverage", params=point)
+    wildfire = client.get(
+        url="/api/v1/coverage", params={**point, "lens": "wildfire", "opticalEvidence": "true"}
+    )
+    unknown = client.get(url="/api/v1/coverage", params={**point, "lens": "volcano"})
+
+    # Assert
+    assert default.status_code == 200
+    assert default.json()["lens"] == "flood_wetland"
+    assert default.json()["cache"] == "miss"
+    assert default.json()["etaSeconds"] > 0
+    assert default.json()["grid"] is None
+    assert wildfire.json()["lens"] == "wildfire"
+    assert unknown.status_code == 422
+
+
 def test_the_openapi_document_lists_the_new_endpoints(
     start_api: Callable[..., TestClient],
 ) -> None:
