@@ -30,6 +30,17 @@ Results are diagnostic evidence: no forecasts, no probabilities, no causes.
 
 </div>
 
+## Contents
+
+- [Quickstart](#quickstart)
+- [Configuration](#configuration)
+- [API](#api)
+- [Project layout](#project-layout)
+- [Scene planning (SAR core)](#scene-planning-sar-core)
+- [Exploration flow](#exploration-flow)
+- [Testing](#testing) · [Quality](#quality) · [CI](#ci) · [Deployment](#deployment)
+- [License](#license)
+
 For a point or a drawn area it plans the scenes to read from the public ASF catalog, sends that plan to the ML gateway on Modal (`nova-frontier-model`), tracks the job and serves the result with its layers, `limitations` and `scientificStatus: "diagnostic"`. It also lists the cases measured ahead of time, the NISAR interferometric pairs over a point, the lenses and place search results for the globe. A `wildfire` answer adds NASA FIRMS active-fire detections as separate context.
 
 | Method | Path (under `/api/v1`) | Answers |
@@ -147,11 +158,70 @@ tests/          unit/ (mirrors src), integration/ (Postgres), live/ (NASA)
 
 ## Scene planning (SAR core)
 
-`ScenePlanner` turns an area of interest and "now" into the exact scenes to read. The area comes from `aoi_from_point` (the 10.24 km square in the local UTM zone) or `aoi_from_geojson` (a drawn polygon: closed ring, up to 100 vertices, repaired with `buffer(0)`, split at ±180°, measured on the ellipsoid and capped by native pixels: about 110 km² is the ideal, 400 km² the hard limit). `AsfCatalog` queries the public ASF SearchAPI once for the last five months without maturity or configuration filters (maturity is read from the product URL) and fails loudly instead of returning a truncated list. The planner keeps one scene per acquisition (VALIDATED over PROVISIONAL over BETA over urgent response, then CRID and version), picks one series, the ML service's key `track_direction_frame_bandwidthCode_mode` (a frame can mix 2005 and 4005 bandwidth codes or DHDH and QPDH modes, which have incompatible grids; full coverage, dual-pol, most dates, newest) and walks back from the newest scene in steps of about 30 days (± 6) up to five images. Fewer than four usable dates is an `insufficientHistory` plan, no scene at all is `noCoverage`, and `maturityMixed` tells the UI when the series mixes maturities.
+`ScenePlanner` turns an area of interest and "now" into the exact scenes to read.
+
+| # | Step | Rule | Why |
+|---|---|---|---|
+| 1 | Area | A point becomes the 10.24 km square in the local UTM zone (`aoi_from_point`). A drawn polygon (`aoi_from_geojson`) needs a closed ring and at most 100 vertices; it is repaired with `buffer(0)`, split at ±180° and measured on the ellipsoid | One fixed square gives every point the same 1024 × 1024 window at 10 m; repairing and splitting keeps hand-drawn and dateline shapes valid |
+| 2 | Size limit | Capped by native pixels: about 110 km² is the ideal, 400 km² the hard limit (`AREA_TOO_LARGE`) | The analysis reads a window of native pixels, so the cost grows with the area |
+| 3 | Catalog query | One ASF SearchAPI query for the last five months (152 days), with no maturity or configuration filter; maturity is read from the product URL | Seeing every product lets the planner choose; the query fails loudly instead of returning a truncated list |
+| 4 | One scene per acquisition | VALIDATED over PROVISIONAL over BETA over urgent response, then CRID and version | The same pass can be published several times; keep the most mature copy |
+| 5 | One series | Group by the ML service's key `track_direction_frame_bandwidthCode_mode`; prefer full coverage (≥ 95 %), dual-pol, most dates, newest | A frame can mix 2005 and 4005 bandwidth codes or DHDH and QPDH modes, whose grids are incompatible |
+| 6 | Dates | Walk back from the newest scene in steps of about 30 days (± 6), up to five images | Evenly spaced dates give the lens a baseline and a target |
+| 7 | Verdict on the plan | Fewer than four usable dates is `insufficientHistory`, no scene at all is `noCoverage`; `maturityMixed` tells the UI when the series mixes maturities | The lenses need at least three earlier dates plus the target; the UI must say when maturities differ |
 
 ## Exploration flow
 
-`POST /api/v1/explorations` validates the area (`INVALID_GEOMETRY`, `AREA_TOO_LARGE`), refuses `source: "S"` (`SOURCE_NOT_AVAILABLE`: S-band will arrive as a precomputed layer), plans the scenes with `ScenePlanner`, and answers from the cache when the same lens, area and granules finished in the last day. Otherwise it checks capacity (`QUEUE_FULL`), hands the plan to the runner and stores the job. The default runner posts it to the Modal gateway of `nova-frontier-model`, which reads the planned windows (up to 10.24 km at 10 m), runs the lens and serves the layers; polling `GET /explorations/{id}` refreshes the job from the gateway. Failures are explicit: no scenes is a final `noData` answer with `NO_COVERAGE` or `INSUFFICIENT_HISTORY`; a catalog outage is `502 UPSTREAM_CATALOG_ERROR` (and names a precomputed case when one matches); an exploration past the deadline is `partial` with `TIMEOUT_PARTIAL`. Every result carries `limitations[]`, `scientificStatus: "diagnostic"` and `isDemo`; an area wider than the analysed window says so in `limitations` and `quality.windowTruncated`. A `wildfire` answer also carries `result.fireContext`, kept apart from the radar `lens`: NASA FIRMS VIIRS active-fire detections (SNPP and NOAA-20, archive and near real time, de-duplicated) inside the area between the last baseline pass and the target pass, low-confidence ones counted separately; it is `available`, `unavailable` (FIRMS failed or was slow) or `notConfigured`, and never reports a cause or a burned area. It lives in `hazards/wildfire/`. The `insar` lens takes a pair chosen from `GET /api/v1/insar/pairs` instead of a GCOV scene plan (the planner is skipped): the backend reads the pair's two days from its granule name, sends `insar-pair` to the gateway and returns `result.insar` (median coherence, coherent and phase cells, coherence and wrapped phase at the point) with two layers, coherence and wrapped phase (cyclic palette). The phase is wrapped and not corrected for troposphere or ionosphere, so `losDisplacementCm` is always `null` and every answer says so. Measured on 2026-11-12 (Kumamoto, track 24, 2026-07-21 to 2026-08-14): 50 s, 62,500 coherent cells in the 5 km window, 39,584 with phase at the 0.35 threshold. Measured on 2026-11-12 (Qadirabad, five scenes, 1024 × 1024 cells): about 35 s of analysis plus rendering once warm, 47 s from a cold start.
+`POST /api/v1/explorations` validates the area, refuses `source: "S"` (S-band will arrive as a precomputed layer), plans the scenes, answers from the cache when the same lens, area and granules finished in the last day, checks capacity, hands the plan to the runner and stores the job. The default runner posts it to the Modal gateway of `nova-frontier-model`, which reads the planned windows (up to 10.24 km at 10 m), runs the lens and serves the layers; polling `GET /explorations/{id}` refreshes the job from the gateway.
+
+**States** (`ExplorationStatus`):
+
+- `queued` → the job was handed to the gateway and waits there (also the state the gateway reports while it queues).
+- `running` → the gateway reports the job is processing.
+- `succeeded` → the gateway answered `complete`.
+- `partial` → the gateway answered `partial`, or `complete` with a lens that had `insufficient_data`, or the deadline (`EXPLORATION_DEADLINE_SECONDS`) passed while the job was still active (`TIMEOUT_PARTIAL`).
+- `noData` → the plan had no usable scenes (`NO_COVERAGE` or `INSUFFICIENT_HISTORY`, final at once), or the gateway found no usable measurements (`NO_COVERAGE`).
+- `failed` → the gateway reported a failure, an unknown status or an empty result (`ANALYSIS_FAILED`).
+- `cancelled` → `DELETE /explorations/{id}` on an active job (`CANCELLED`).
+
+**Reason codes** (`constants/errors.py`). Errors are `application/problem+json`; the codes marked "in the job" arrive inside a `200` exploration as `error.reasonCode`.
+
+| `reasonCode` | HTTP | What the user sees |
+|---|---|---|
+| `INVALID_REQUEST` | 422 | The request body or query did not validate (also a bad InSAR pair) |
+| `INVALID_GEOMETRY` | 422 | The drawn area is not a valid Point, Polygon or MultiPolygon |
+| `AREA_TOO_LARGE` | 422 | The area is above the 400 km² limit |
+| `SOURCE_NOT_AVAILABLE` | 422 | S-band was asked for; only L-band runs on demand |
+| `INVALID_QUERY` | 422 | The place search text is too short or too long |
+| `NOT_FOUND` | 404 | Unknown path or exploration |
+| `CASE_NOT_FOUND` | 404 | Unknown case id |
+| `METHOD_NOT_ALLOWED` | 405 | Wrong method for the path |
+| `PAYLOAD_TOO_LARGE` | 413 | The request body is too large |
+| `RATE_LIMITED` | 429 | More than `RATE_LIMIT_PER_MINUTE` requests from one client |
+| `UPSTREAM_CATALOG_ERROR` | 502 | The ASF catalog failed; names a precomputed case when one matches |
+| `UPSTREAM_ML_ERROR` | 502 | The ML gateway did not answer |
+| `UPSTREAM_GEOCODER_ERROR` | 502 | Place search provider failed |
+| `CASES_UNAVAILABLE` | 502 | No copy of the known cases and the gateway failed |
+| `QUEUE_FULL` | 503 | `MAX_ACTIVE_EXPLORATIONS` are running; retry later |
+| `INTERNAL_ERROR` | 500 | Unexpected error; details are never echoed |
+| `NO_COVERAGE` | in the job | `noData`: no scene covers the area, or no usable measurement |
+| `INSUFFICIENT_HISTORY` | in the job | `noData`: fewer than four usable dates |
+| `TIMEOUT_PARTIAL` | in the job | `partial`: the deadline passed; the planned scenes are listed |
+| `ANALYSIS_FAILED` | in the job | `failed`, with a plain detail from the gateway's error code |
+| `CANCELLED` | in the job | `cancelled` |
+
+**Every result** carries `limitations[]`, `scientificStatus: "diagnostic"` and `isDemo`; an area wider than the analysed window says so in `limitations` and `quality.windowTruncated`.
+
+**Wildfire** answers also carry `result.fireContext`, kept apart from the radar `lens` (it lives in `hazards/wildfire/`): NASA FIRMS VIIRS active-fire detections (SNPP and NOAA-20, archive and near real time, de-duplicated) inside the area between the last baseline pass and the target pass, low-confidence ones counted separately. It is `available`, `unavailable` (FIRMS failed or was slow) or `notConfigured`, and never reports a cause or a burned area.
+
+**InSAR** (`insar` lens) takes a pair chosen from `GET /api/v1/insar/pairs` instead of a GCOV scene plan (the planner is skipped): the backend reads the pair's two days from its granule name, sends `insar-pair` to the gateway and returns `result.insar` (median coherence, coherent and phase cells, coherence and wrapped phase at the point) with two layers, coherence and wrapped phase (cyclic palette). The phase is wrapped and not corrected for troposphere or ionosphere, so `losDisplacementCm` is always `null` and every answer says so.
+
+**Measured timings:**
+
+| Case | Date | Input | Cells / window | Time |
+|---|---|---|---|---|
+| Kumamoto, InSAR pair (track 24, 2026-07-21 to 2026-08-14) | 2026-11-12 | One GUNW pair | 62,500 coherent cells in the 5 km window; 39,584 with phase at the 0.35 threshold | 50 s |
+| Qadirabad, GCOV lens | 2026-11-12 | Five scenes | 1024 × 1024 cells | About 35 s of analysis plus rendering once warm; 47 s from a cold start |
 
 ## Testing
 
