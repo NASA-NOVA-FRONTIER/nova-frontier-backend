@@ -1,6 +1,8 @@
 <div align="center">
 
-<img src=".github/assets/architecture.png" alt="Architecture diagram of the NISAR Hazard Watch backend" width="100%">
+<img src=".github/assets/architecture.png" alt="NISAR Hazard Watch, how a question travels: the browser calls this backend on Railway, which plans scenes from ASF, adds FIRMS fire detections and Nominatim places, keeps jobs in PostgreSQL and posts the job to the ML gateway on Modal; the gateway reads NISAR data from NASA and the radar layers go back to the globe" width="100%">
+
+<sub>Diagram source: the frontend repo, <code>docs/architecture/</code> (render with <code>pnpm diagram</code>).</sub>
 
 # NISAR Hazard Watch — Backend
 
