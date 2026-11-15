@@ -41,6 +41,7 @@ Results are diagnostic evidence: no forecasts, no probabilities, no causes.
 - [What we don't claim](#what-we-dont-claim)
 - [Data sources and citations](#data-sources-and-citations)
 - [Testing](#testing) · [Quality](#quality) · [CI](#ci) · [Deployment](#deployment)
+- [NASA Space Apps 2026](#nasa-space-apps-2026)
 - [How to cite this project](#how-to-cite-this-project)
 - [License](#license)
 
@@ -269,6 +270,27 @@ uv run pre-commit install
 ## Deployment
 
 Railway builds the `Dockerfile`, runs `alembic upgrade head` before each deploy (`railway.toml`) and health-checks `/api/v1/health/live`. Variables: `DATABASE_URL` (reference of the Postgres service), `CORS_ALLOWED_ORIGINS`, `ENVIRONMENT=production`, `LOG_LEVEL`. **`main` is production**: change it only through reviewed pull requests with green CI.
+
+## NASA Space Apps 2026
+
+**Challenge:** [Dancing with the SARs](https://www.spaceappschallenge.org/2026/challenges/dancing-with-the-sars/). It asks for an interactive application that uses NISAR radar data to track and show one or more kinds of surface change around the world.
+
+**Demo:** the live app at [nova-frontier-frontend.vercel.app](https://nova-frontier-frontend.vercel.app), backed by this API ([Swagger UI](https://nova-frontier-backend-main.up.railway.app/docs)).
+
+**Team Nova Frontier:**
+
+| Name | Role | Built |
+|---|---|---|
+| [Jesús Alfonso Pinzón Vega](https://github.com/JAPV-X2612) | Architect · team lead | Backend API and system design |
+| [Cristian Santiago Pedraza Rodríguez](https://github.com/cris-eci) | Front end · design | Landing, explorer, method and the design system |
+| [Andersson David Sánchez Méndez](https://github.com/AnderssonProgramming) | Software developer | Landslide hazard module (in progress) |
+| [David Stiven Sarria Arcila](https://github.com/DASarria) | Data pipeline · wildfires | NISAC_Data_Lab: the ASF data pipeline and the response-time lab |
+| [Daniel Felipe Martínez Hernández](https://github.com/Ch0comilo) | Machine learning · radar science | nova-frontier-model and NISAR-Models |
+| [Katheryn Sofía Guasca Chavarro](https://github.com/KillerZeus666) | Front-end developer | Flood analysis interface, event timeline and data visualizations |
+
+**Use of AI:** code in this repository was written with help from Claude Code (Anthropic), under the conventions in [`CLAUDE.md`](CLAUDE.md), and reviewed by the team through pull requests. The scientific numbers (cell counts, coherence, timings) come from measured runs of the radar pipeline in [nova-frontier-model](https://github.com/NASA-NOVA-FRONTIER/nova-frontier-model) on real NISAR data, not from an AI model.
+
+**Acknowledgements:** NASA and ISRO for the NISAR mission and its open data; the Alaska Satellite Facility DAAC, which archives and serves the NISAR products; NASA LANCE / ESDIS for FIRMS; NASA JPL OPERA and PO.DAAC; the OpenStreetMap contributors; and the organisers of the NASA Space Apps local event in Chía, Colombia.
 
 ## How to cite this project
 
