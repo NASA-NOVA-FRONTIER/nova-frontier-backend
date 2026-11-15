@@ -665,6 +665,7 @@ class ExplorationService:
             elapsed_seconds=round(elapsed, 1),
             stages=self._stages(job=job),
             progress=self._progress(job=job),
+            queue_position=await self._queue_position(job=job, now=now),
             plan=self._plan_summary(plan=job.plan) if job.plan else None,
             result=job.result,
             error=job.error,
@@ -701,8 +702,22 @@ class ExplorationService:
                 )
         return stages
 
+    async def _queue_position(self, job: ExplorationJob, now: datetime) -> int | None:
+        """How many analyses are ahead: 0 while running or first in line, None once it ended.
+
+        Only queued jobs count: the gateway also reports `queued` while a worker starts, and runs
+        several jobs at once, so a running job is not one this job waits for.
+        """
+        if job.status is ExplorationStatus.RUNNING:
+            return 0
+        if job.status is ExplorationStatus.QUEUED:
+            return await self._repository.count_queued_ahead(job=job, now=now)
+        return None
+
     @staticmethod
     def _progress(job: ExplorationJob) -> Progress:
+        # The gateway reports only queued or running while a job works (nova-frontier-model
+        # docs/API.md), with no scene count, so scenesRead stays null until the result arrives.
         read = None
         if job.result is not None:
             analysis = job.result.products.analysis if job.result.products else None

@@ -141,6 +141,53 @@ async def test_overdue_jobs_do_not_count_as_active(repository: SqlJobRepository)
     assert active == 1
 
 
+async def test_only_earlier_queued_jobs_inside_their_deadline_are_ahead_in_line(
+    repository: SqlJobRepository,
+) -> None:
+    # Arrange
+    jobs = [
+        make_job(id="exp_earlier", created_at=NOW - timedelta(seconds=20)),
+        make_job(
+            id="exp_running",
+            created_at=NOW - timedelta(seconds=10),
+            status=ExplorationStatus.RUNNING,
+        ),
+        make_job(
+            id="exp_late",
+            created_at=NOW - timedelta(seconds=5),
+            deadline_at=NOW - timedelta(seconds=1),
+        ),
+        make_job(id="exp_later", created_at=NOW + timedelta(seconds=5)),
+    ]
+    for job in jobs:
+        await repository.add(job=job)
+
+    # Act
+    ahead = await repository.count_queued_ahead(
+        job=make_job(id="exp_mine", created_at=NOW), now=NOW
+    )
+
+    # Assert
+    assert ahead == 1
+
+
+async def test_jobs_created_at_the_same_instant_queue_by_id(
+    repository: SqlJobRepository,
+) -> None:
+    # Arrange
+    first = make_job(id="exp_a", created_at=NOW)
+    second = make_job(id="exp_b", created_at=NOW)
+    for job in (first, second):
+        await repository.add(job=job)
+
+    # Act
+    ahead_of_first = await repository.count_queued_ahead(job=first, now=NOW)
+    ahead_of_second = await repository.count_queued_ahead(job=second, now=NOW)
+
+    # Assert
+    assert (ahead_of_first, ahead_of_second) == (0, 1)
+
+
 async def test_expiring_overdue_jobs_marks_only_those_as_partial(
     repository: SqlJobRepository,
 ) -> None:

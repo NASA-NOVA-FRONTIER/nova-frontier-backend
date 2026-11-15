@@ -121,7 +121,7 @@ Environment variables (see `.env.example`). The app fails at start-up on a malfo
 | `GET /api/v1/health` | Dependency report: database (critical), NASA CMR, Modal and Earthdata credentials. `200` when ok or degraded, `503` when a critical dependency is down |
 | `GET /api/v1/health/live` | Liveness only; never touches a dependency (used by the Railway health check) |
 | `POST /api/v1/explorations` | Start an exploration `{lens, geometry, source?, opticalEvidence?, pairId?, coherenceThreshold?}` (`pairId` is required by the `insar` lens and refused by the others; `coherenceThreshold` is 0.1 to 0.9, default 0.35) (`geometry` is a GeoJSON Point, Polygon or MultiPolygon). `202` while it runs, `200` when the answer is final (cache hit, or no data) |
-| `GET /api/v1/explorations/{id}` | Status, stage, per-stage seconds, `etaSeconds` and `etaRemainingSeconds`, progress, the scene plan and, when done, the result with its layers, limitations and `scientificStatus` |
+| `GET /api/v1/explorations/{id}` | Status, stage, per-stage seconds, `etaSeconds` and `etaRemainingSeconds`, progress, `queuePosition`, the scene plan and, when done, the result with its layers, limitations and `scientificStatus` |
 | `POST /api/v1/explorations/{id}/analysis` | Start or reuse a bounded regional analysis of the exploration's catalog series. Poll the returned exploration ID. Regional measurements carry their own sampled dates and grid in `result.products.analysis`. |
 | `DELETE /api/v1/explorations/{id}` | Cancel a running exploration |
 | `GET /api/v1/explorations/{id}/layers/{layerId}` | `307` redirect to the layer image on the ML gateway |
@@ -253,6 +253,12 @@ tests/          unit/ (mirrors src), integration/ (Postgres), live/ (NASA)
 - `noData` → the plan had no usable scenes (`NO_COVERAGE` or `INSUFFICIENT_HISTORY`, final at once), or the gateway found no usable measurements (`NO_COVERAGE`).
 - `failed` → the gateway reported a failure, an unknown status or an empty result (`ANALYSIS_FAILED`).
 - `cancelled` → `DELETE /explorations/{id}` on an active job (`CANCELLED`).
+
+**While it runs** (the waiting panel's four steps: searching the catalog → reading passes → measuring change → drawing layers):
+
+- `stages` starts with `planning` (searching the catalog, done before the job is handed over). While the job is active, one `processing` entry stands for the other three steps, because the gateway reports only `queued` or `running`, with no sub-stage. Once it ends, `reading`, `analysing` and `rendering` arrive with their seconds.
+- `progress.scenesRead` is null until the result arrives, for the same reason; `scenesTotal` is known from the plan.
+- `queuePosition` is how many analyses are ahead of this one: while `queued`, the other queued jobs created before it (ties broken by id); 0 while `running`; null once it ends. Running jobs don't count, because the gateway runs several at once and also reports `queued` while a worker starts. Another job's status is only refreshed when someone polls it, so an abandoned queued job counts as ahead until its deadline.
 
 **Reason codes** (`constants/errors.py`). Errors are `application/problem+json`; the codes marked "in the job" arrive inside a `200` exploration as `error.reasonCode`.
 

@@ -136,6 +136,7 @@ class ExplorationView(CamelModel):
     elapsed_seconds: float
     stages: list[StageTiming] = Field(default_factory=list)
     progress: Progress | None = None
+    queue_position: int | None = None
     plan: PlanSummary | None = None
     result: ExplorationResult | None = None
     error: ProblemInfo | None = None
