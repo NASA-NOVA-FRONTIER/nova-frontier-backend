@@ -35,7 +35,9 @@ Results are diagnostic evidence: no forecasts, no probabilities, no causes.
 - [Quickstart](#quickstart)
 - [Configuration](#configuration)
 - [API](#api)
+- [Example requests](#example-requests)
 - [Project layout](#project-layout)
+- [Architecture decisions](#architecture-decisions)
 - [Scene planning (SAR core)](#scene-planning-sar-core)
 - [Exploration flow](#exploration-flow)
 - [What we don't claim](#what-we-dont-claim)
@@ -134,6 +136,55 @@ Every response carries `X-Request-ID` (a safe incoming value is kept, otherwise 
 
 Payload fields are camelCase.
 
+## Example requests
+
+Read-only calls against the public deployment (responses captured on 2026-11-15, trimmed).
+
+```bash
+curl -s https://nova-frontier-backend-main.up.railway.app/api/v1/lenses
+```
+
+```json
+[
+  {
+    "id": "flood_wetland",
+    "title": "Flood and wetland",
+    "description": "Dual-polarization darkening and brightening of the latest scene against the area's own earlier measurements, diagnostic of open-water and wet-surface change.",
+    "opticalEvidence": true,
+    "minimumDates": 4
+  },
+  …
+  {
+    "id": "insar",
+    "title": "Ground motion (InSAR pair)",
+    "opticalEvidence": false,
+    "minimumDates": 2,
+    …
+  }
+]
+```
+
+The scene plan for Qadirabad (Chenab river, Pakistan), without running anything:
+
+```bash
+curl -s "https://nova-frontier-backend-main.up.railway.app/api/v1/coverage?lon=73.713&lat=32.329"
+```
+
+```json
+{
+  "plan": {
+    "status": "ready",
+    "seriesKey": "084_A_018_4005_DHDH",
+    "dates": ["2026-07-14", "2026-08-19", "2026-09-12", "2026-10-18", "2026-11-11"],
+    "maturityMixed": true,
+    "notes": []
+  },
+  "areaKm2": 104.904,
+  "warnings": [],
+  "precomputedCase": null
+}
+```
+
 ## Project layout
 
 ```
@@ -159,6 +210,14 @@ tests/          unit/ (mirrors src), integration/ (Postgres), live/ (NASA)
 3. Append `(router, "/<resource>")` to `ROUTERS` in `api/routes/router.py`.
 4. Put logic in `services/`, depend on a `ports/` interface and implement it in `adapters/`.
 5. Write DTOs as `CamelModel` subclasses and the tests mirroring the source path.
+
+## Architecture decisions
+
+- **Hexagonal: ports and adapters.** Services depend on `Protocol` interfaces in `ports/`; concrete adapters are wired only in `api/composition.py`. That is how `RUNNER=inProcess` swaps the ML gateway for a synthetic, demo-labelled runner, and how the unit tests run on fakes with no network.
+- **Heavy reads on Modal, a small API on Railway.** Reading the planned NISAR windows is the slow part (stage budgets in `constants/explorations.py`: 105 s reading against 15 s analysing and 15 s rendering), so it runs on the `nova-frontier-model` gateway's workers, which keep a chip cache on a Modal Volume. The API only plans, queues and relays, and refuses new work with `503 QUEUE_FULL` when `MAX_ACTIVE_EXPLORATIONS` are running or the gateway is busy.
+- **Asynchronous jobs with polling.** An exploration takes minutes, so `POST` answers `202` with a job and the client polls `GET /explorations/{id}`, which refreshes the job from the gateway; `etaSeconds` comes from the p80 of recent comparable runs (`EtaEstimator`).
+- **PostgreSQL as the job store and a 24 h result cache.** Jobs live in the database, not in memory, so any poll sees the same state. `transition` only updates rows that are still active, so a cancel and a late poll cannot overwrite each other. A finished job with the same lens, area and granules is reused for `EXPLORATION_CACHE_TTL_SECONDS` (86,400 s).
+- **One error shape.** Every error is `application/problem+json` with a stable `reasonCode` and the `requestId`; the frontend maps the code to its own message, and server-side details of a 500 are never echoed.
 
 ## Scene planning (SAR core)
 
