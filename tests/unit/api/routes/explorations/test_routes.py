@@ -356,6 +356,52 @@ def test_coverage_describes_the_plan_for_a_point(start_api: Callable[..., TestCl
     assert invalid.status_code == 422
 
 
+def test_coverage_estimates_the_lens_it_is_asked_about(
+    start_api: Callable[..., TestClient],
+) -> None:
+    # Arrange
+    client = start_api()
+    point = {"lon": QADIRABAD_LON, "lat": QADIRABAD_LAT}
+
+    # Act
+    default = client.get(url="/api/v1/coverage", params=point)
+    wildfire = client.get(
+        url="/api/v1/coverage", params={**point, "lens": "wildfire", "opticalEvidence": "true"}
+    )
+    unknown = client.get(url="/api/v1/coverage", params={**point, "lens": "volcano"})
+
+    # Assert
+    assert default.status_code == 200
+    assert default.json()["lens"] == "flood_wetland"
+    assert default.json()["cache"] == "miss"
+    assert default.json()["etaSeconds"] > 0
+    assert default.json()["grid"] is None
+    assert wildfire.json()["lens"] == "wildfire"
+    assert unknown.status_code == 422
+
+
+def test_coverage_checks_the_cache_with_the_optical_evidence_it_is_sent(
+    start_api: Callable[..., TestClient],
+) -> None:
+    # Arrange
+    client = start_api()
+    point = {"lon": QADIRABAD_LON, "lat": QADIRABAD_LAT}
+    client.post(url=URL, json={**BODY, "opticalEvidence": True})
+
+    # Act
+    flood_default = client.get(url="/api/v1/coverage", params=point)
+    with_optical = client.get(url="/api/v1/coverage", params={**point, "opticalEvidence": "true"})
+    without_optical = client.get(
+        url="/api/v1/coverage", params={**point, "opticalEvidence": "false"}
+    )
+
+    # Assert
+    assert flood_default.json()["cache"] == "hit"
+    assert flood_default.json()["etaSeconds"] == 0
+    assert with_optical.json()["cache"] == "hit"
+    assert without_optical.json()["cache"] == "miss"
+
+
 def test_the_openapi_document_lists_the_new_endpoints(
     start_api: Callable[..., TestClient],
 ) -> None:

@@ -11,12 +11,17 @@ from nisar_hazard_watch.constants.errors import ReasonCode
 from nisar_hazard_watch.constants.explorations import (
     ACTIVE_STATUSES,
     AREA_BUCKET_KM2_STEP,
+    DEFAULT_COVERAGE_LENS,
+    DEFAULT_OPTICAL_LENSES,
     ETA_TIMING_KEY,
     EXPLORATION_ID_PREFIX,
     GEOJSON_POINT,
     LIMITATIONS,
     OBSERVED_STATUS,
+    QUALITY_GRID_HEIGHT,
+    QUALITY_GRID_WIDTH,
     QUALITY_MATURITY_MIXED,
+    QUALITY_POSTING_METERS,
     QUALITY_WINDOW_TRUNCATED,
     REGIONAL_DEADLINE_SECONDS,
     REGIONAL_MAX_DATES,
@@ -54,6 +59,7 @@ from nisar_hazard_watch.exceptions.exploration_errors import (
 )
 from nisar_hazard_watch.exceptions.geometry_errors import InvalidGeometryError
 from nisar_hazard_watch.models.exploration import (
+    CoverageGrid,
     CoverageView,
     ExplorationRequest,
     ExplorationResult,
@@ -303,24 +309,70 @@ class ExplorationService:
             raise ExplorationNotFoundError("the exploration has no published asset with that name")
         return url
 
-    async def coverage(self, geometry: dict[str, Any]) -> CoverageView:
+    async def coverage(
+        self,
+        geometry: dict[str, Any],
+        lens: Lens = DEFAULT_COVERAGE_LENS,
+        optical_evidence: bool | None = None,
+    ) -> CoverageView:
+        if optical_evidence is None:
+            optical_evidence = lens in DEFAULT_OPTICAL_LENSES
         aoi = self._aoi(geometry=geometry)
         plan = await self._planner.plan(aoi=aoi)
         longitude, latitude = aoi_center(aoi=aoi)
         case = next(
             (
                 found.id
-                for lens in Lens
-                if (found := self._cases.find(longitude=longitude, latitude=latitude, lens=lens))
+                for known in Lens
+                if (found := self._cases.find(longitude=longitude, latitude=latitude, lens=known))
             ),
             None,
         )
-        return CoverageView(
+        view = CoverageView(
             plan=self._plan_summary(plan=plan),
             area_km2=aoi.area_km2,
             warnings=aoi.warnings,
             precomputed_case=case,
+            lens=lens,
         )
+        # Same rule as create(): with no coverage or no scenes nothing would run.
+        if lens is Lens.INSAR or plan.status is PlanStatus.NO_COVERAGE or not plan.scenes:
+            return view
+        request = ExplorationRequest(
+            lens=lens, geometry=geometry, optical_evidence=optical_evidence
+        )
+        now = self._clock()
+        fresh = await self._repository.find_fresh(
+            cache_key=self._cache_key(request=request, plan=plan),
+            newer_than=now - timedelta(seconds=self._cache_ttl_seconds),
+        )
+        if fresh is not None:
+            return view.model_copy(
+                update={"cache": CacheState.HIT, "eta_seconds": 0.0, "grid": self._grid(job=fresh)}
+            )
+        eta = await self._eta.estimate(
+            lens=lens, scenes_total=len(plan.scenes), area_bucket=self._area_bucket(aoi=aoi)
+        )
+        return view.model_copy(update={"cache": CacheState.MISS, "eta_seconds": eta})
+
+    @staticmethod
+    def _grid(job: ExplorationJob) -> CoverageGrid | None:
+        """The analysis grid a finished job reported, or None when it didn't report all of it."""
+        quality = job.result.quality if job.result is not None else {}
+        posting = quality.get(QUALITY_POSTING_METERS)
+        if isinstance(posting, list):
+            posting = posting[0] if posting else None
+        width = quality.get(QUALITY_GRID_WIDTH)
+        height = quality.get(QUALITY_GRID_HEIGHT)
+        # bool is an int subclass; a True width is not a grid.
+        if not (
+            type(width) is int
+            and type(height) is int
+            and isinstance(posting, int | float)
+            and not isinstance(posting, bool)
+        ):
+            return None
+        return CoverageGrid(width=width, height=height, posting_m=float(posting))
 
     @staticmethod
     def _aoi(geometry: dict[str, Any]) -> Aoi:

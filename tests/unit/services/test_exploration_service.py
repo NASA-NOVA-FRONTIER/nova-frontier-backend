@@ -39,6 +39,7 @@ from nisar_hazard_watch.services.exploration_service import ExplorationService
 from tests.factories import QADIRABAD_LAT, QADIRABAD_LON, make_job, make_plan
 from tests.unit.services.conftest import (
     DEADLINE_SECONDS,
+    PRIOR_SECONDS,
     FakeFireContext,
     FakePlanner,
     ManualClock,
@@ -55,6 +56,7 @@ SMALL_POLYGON = {
 }
 Factory = Callable[..., ExplorationService]
 UNKNOWN_SCIENCE_STATUS = "mystery"
+GRID_QUALITY = {"gridWidth": 96, "gridHeight": 96, "postingMeters": [40.0, 40.0]}
 
 
 def _request(**overrides: object) -> ExplorationRequest:
@@ -674,6 +676,98 @@ async def test_coverage_describes_the_plan_without_running_anything(
     assert coverage.area_km2 == pytest.approx(104.86, abs=0.5)
     assert coverage.precomputed_case is None
     assert runner.submissions == []
+
+
+async def test_coverage_estimates_the_default_lens_before_anything_ran(
+    make_service: Factory, runner: ScriptedRunner
+) -> None:
+    # Arrange
+    service = make_service()
+
+    # Act
+    coverage = await service.coverage(geometry=POINT)
+
+    # Assert
+    assert coverage.lens is Lens.FLOOD_WETLAND
+    assert coverage.cache is CacheState.MISS
+    assert coverage.eta_seconds == PRIOR_SECONDS
+    assert coverage.grid is None
+    assert runner.submissions == []
+
+
+async def test_coverage_reports_a_cache_hit_with_the_grid_the_job_used(
+    make_service: Factory, runner: ScriptedRunner
+) -> None:
+    # Arrange
+    service = make_service()
+    first, _ = await service.create(request=_request(optical_evidence=True))
+    _succeeded(runner, quality=GRID_QUALITY)
+    await service.get(exploration_id=first.id)
+
+    # Act
+    coverage = await service.coverage(geometry=POINT)
+
+    # Assert
+    assert coverage.cache is CacheState.HIT
+    assert coverage.eta_seconds == 0.0
+    assert coverage.grid is not None
+    assert (coverage.grid.width, coverage.grid.height, coverage.grid.posting_m) == (96, 96, 40.0)
+    assert len(runner.submissions) == 1
+
+
+async def test_coverage_checks_the_cache_for_the_lens_and_optical_flag_it_is_asked_about(
+    make_service: Factory, runner: ScriptedRunner
+) -> None:
+    # Arrange
+    service = make_service()
+    first, _ = await service.create(request=_request(optical_evidence=True))
+    _succeeded(runner)
+    await service.get(exploration_id=first.id)
+
+    # Act
+    flood_default = await service.coverage(geometry=POINT)
+    without_optical = await service.coverage(geometry=POINT, optical_evidence=False)
+    other_lens = await service.coverage(geometry=POINT, lens=Lens.WILDFIRE, optical_evidence=True)
+
+    # Assert
+    assert flood_default.cache is CacheState.HIT
+    assert flood_default.grid is None
+    assert without_optical.cache is CacheState.MISS
+    assert other_lens.cache is CacheState.MISS
+    assert other_lens.lens is Lens.WILDFIRE
+
+
+async def test_coverage_without_optical_evidence_assumes_what_the_frontend_sends(
+    make_service: Factory, runner: ScriptedRunner
+) -> None:
+    # Arrange
+    service = make_service()
+    wildfire, _ = await service.create(request=_request(lens=Lens.WILDFIRE))
+    _succeeded(runner)
+    await service.get(exploration_id=wildfire.id)
+
+    # Act
+    coverage = await service.coverage(geometry=POINT, lens=Lens.WILDFIRE)
+
+    # Assert
+    assert coverage.cache is CacheState.HIT
+
+
+async def test_coverage_gives_no_wait_when_nothing_would_run(
+    make_service: Factory, planner: FakePlanner
+) -> None:
+    # Arrange
+    service = make_service()
+    uncovered_plan = make_plan(scenes=[], status=PlanStatus.NO_COVERAGE)
+
+    # Act
+    insar = await service.coverage(geometry=POINT, lens=Lens.INSAR)
+    planner.plan_result = uncovered_plan
+    uncovered = await service.coverage(geometry=POINT)
+
+    # Assert
+    for coverage in (insar, uncovered):
+        assert (coverage.eta_seconds, coverage.cache, coverage.grid) == (None, None, None)
 
 
 KUMAMOTO_PAIR = (

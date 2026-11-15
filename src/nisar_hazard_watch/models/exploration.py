@@ -141,11 +141,24 @@ class ExplorationView(CamelModel):
     error: ProblemInfo | None = None
 
 
+class CoverageGrid(CamelModel):
+    width: int
+    height: int
+    posting_m: float
+
+
 class CoverageView(CamelModel):
     plan: PlanSummary
     area_km2: float
     warnings: list[str] = Field(default_factory=list)
     precomputed_case: str | None = None
+    # What running `lens` here would cost. All three stay null when nothing would run (no coverage,
+    # no scenes, or the insar lens, whose pair is chosen later); a cache hit answers at once.
+    lens: Lens
+    eta_seconds: float | None = None
+    cache: CacheState | None = None
+    # The grid is only known once a job ran, so it comes from a cached answer and is null otherwise.
+    grid: CoverageGrid | None = None
 
 
 class LensInfo(CamelModel):

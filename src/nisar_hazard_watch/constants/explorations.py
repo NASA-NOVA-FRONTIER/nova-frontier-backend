@@ -134,6 +134,9 @@ GEOJSON_POINT = "Point"
 ETA_TIMING_KEY = "etaSeconds"
 QUALITY_MATURITY_MIXED = "maturityMixed"
 QUALITY_WINDOW_TRUNCATED = "windowTruncated"
+QUALITY_GRID_WIDTH = "gridWidth"
+QUALITY_GRID_HEIGHT = "gridHeight"
+QUALITY_POSTING_METERS = "postingMeters"
 EXPLORATION_ID_PREFIX = "exp_"
 BODY_LIMIT_BYTES = 16 * 1024
 SCIENTIFIC_STATUS = "diagnostic"
@@ -144,6 +147,11 @@ AREA_BUCKET_KM2_STEP = 100
 ETA_SAMPLE_LIMIT = 50
 ETA_PERCENTILE = 0.8
 ETA_MIN_SAMPLES = 3
+# Coverage answers for the lens "Analyze this spot" runs first, unless the request names another.
+DEFAULT_COVERAGE_LENS = Lens.FLOOD_WETLAND
+# The lenses whose explorations the frontend starts with opticalEvidence (exploreApi.ts `bodyOf`),
+# so coverage checks the same cache entry when the caller doesn't say.
+DEFAULT_OPTICAL_LENSES = frozenset({Lens.FLOOD_WETLAND})
 STAGE_BUDGETS_SECONDS = {
     StageName.PLANNING: 2.0,
     StageName.READING: 105.0,
