@@ -1,6 +1,20 @@
 # NISAR Hazard Watch — Backend
 
-FastAPI backend for **NISAR Hazard Watch**, the NASA Space Apps 2026 project that reads NISAR radar to show surface change after earthquakes, fires, floods and forest loss. The backend plans each exploration from the public ASF catalog, orchestrates the ML workers on Modal and serves the results to the frontend. This repository currently holds the **foundation**: the app factory, configuration, one error shape, structured logs, the health endpoints, Alembic, Docker, CI and the Railway deployment. The exploration API comes next.
+FastAPI backend for **NISAR Hazard Watch**, the NASA Space Apps 2026 project that reads NISAR radar to show surface change after earthquakes, fires, floods and forest loss. For a point or a drawn area it plans the scenes to read from the public ASF catalog, sends that plan to the ML gateway on Modal (`nova-frontier-model`), tracks the job and serves the result with its layers, `limitations` and `scientificStatus: "diagnostic"`. It also lists the cases measured ahead of time, the NISAR interferometric pairs over a point, the lenses and place search results for the globe. A `wildfire` answer adds NASA FIRMS active-fire detections as separate context.
+
+| Method | Path (under `/api/v1`) | Answers |
+|---|---|---|
+| `POST`, `GET`, `DELETE` | `/explorations`, `/explorations/{id}` | Start, follow or cancel an exploration of an area with one lens |
+| `POST` | `/explorations/{id}/analysis` | Start or reuse a regional analysis of the exploration's scene series |
+| `GET` | `/explorations/{id}/layers/{layerId}`, `/explorations/{id}/assets/{name}` | Redirect to a layer image or a published file of the job |
+| `GET` | `/coverage` | Which scenes would be read for a point, without running anything |
+| `GET` | `/cases`, `/cases/{id}`, `/cases/{id}/layers/{layerId}` | The known cases measured ahead of time, one case's evidence, its layer images |
+| `GET` | `/insar/pairs` | NISAR L-band interferometric pairs over a point, newest first |
+| `GET` | `/lenses` | The lenses, what each one shows and how many dates it needs |
+| `GET` | `/places` | Place search for the globe |
+| `GET` | `/health`, `/health/live` | Dependency report and liveness check |
+
+Details of each endpoint are in [API](#api).
 
 ## Quickstart
 
