@@ -1,9 +1,5 @@
 <div align="center">
 
-<img src=".github/assets/architecture.png" alt="NISAR Hazard Watch, how a question travels: the browser calls this backend on Railway, which plans scenes from ASF, adds FIRMS fire detections and Nominatim places, keeps jobs in PostgreSQL and posts the job to the ML gateway on Modal; the gateway reads NISAR data from NASA and the radar layers go back to the globe" width="100%">
-
-<sub>Diagram source: the frontend repo, <code>docs/architecture/</code> (render with <code>pnpm diagram</code>).</sub>
-
 # NISAR Hazard Watch — Backend
 
 **The API behind the radar evidence explorer.**
@@ -30,23 +26,6 @@ Results are diagnostic evidence: no forecasts, no probabilities, no causes.
 
 </div>
 
-## Contents
-
-- [Quickstart](#quickstart)
-- [Configuration](#configuration)
-- [API](#api)
-- [Example requests](#example-requests)
-- [Project layout](#project-layout)
-- [Architecture decisions](#architecture-decisions)
-- [Scene planning (SAR core)](#scene-planning-sar-core)
-- [Exploration flow](#exploration-flow)
-- [What we don't claim](#what-we-dont-claim)
-- [Data sources and citations](#data-sources-and-citations)
-- [Testing](#testing) · [Quality](#quality) · [CI](#ci) · [Deployment](#deployment)
-- [NASA Space Apps 2026](#nasa-space-apps-2026)
-- [How to cite this project](#how-to-cite-this-project)
-- [License](#license)
-
 For a point or a drawn area it plans the scenes to read from the public ASF catalog, sends that plan to the ML gateway on Modal (`nova-frontier-model`), tracks the job and serves the result with its layers, `limitations` and `scientificStatus: "diagnostic"`. It also lists the cases measured ahead of time, the NISAR interferometric pairs over a point, the lenses and place search results for the globe. A `wildfire` answer adds NASA FIRMS active-fire detections as separate context.
 
 | Method | Path (under `/api/v1`) | Answers |
@@ -62,6 +41,32 @@ For a point or a drawn area it plans the scenes to read from the public ASF cata
 | `GET` | `/health`, `/health/live` | Dependency report and liveness check |
 
 Details of each endpoint are in [API](#api).
+
+## Contents
+
+- [Architecture](#architecture)
+- [Quickstart](#quickstart)
+- [Configuration](#configuration)
+- [API](#api)
+- [Example requests](#example-requests)
+- [Project layout](#project-layout)
+- [Architecture decisions](#architecture-decisions)
+- [Scene planning (SAR core)](#scene-planning-sar-core)
+- [Exploration flow](#exploration-flow)
+- [What we don't claim](#what-we-dont-claim)
+- [Data sources and citations](#data-sources-and-citations)
+- [Testing](#testing) · [Quality](#quality) · [CI](#ci) · [Deployment](#deployment)
+- [NASA Space Apps 2026](#nasa-space-apps-2026)
+- [How to cite this project](#how-to-cite-this-project)
+- [License](#license)
+
+## Architecture
+
+How a question travels: the browser calls this backend on Railway, which plans the scenes and hands the job to the ML gateway on Modal; the gateway reads NISAR data from NASA archives and the radar layers go back to the globe.
+
+<img src=".github/assets/architecture.png" alt="NISAR Hazard Watch, how a question travels: the browser calls this backend on Railway, which plans scenes from ASF, adds FIRMS fire detections and Nominatim places, keeps jobs in PostgreSQL and posts the job to the ML gateway on Modal; the gateway reads NISAR data from NASA and the radar layers go back to the globe" width="100%">
+
+<sub>Diagram source: the frontend repo, <code>docs/architecture/</code> (render with <code>pnpm diagram</code>).</sub>
 
 ## Quickstart
 
