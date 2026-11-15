@@ -10,7 +10,7 @@ from nisar_hazard_watch.exceptions.assistant_errors import (
     AssistantBudgetExhaustedError,
     AssistantUnavailableError,
 )
-from nisar_hazard_watch.models.assistant import AssistantRequest
+from nisar_hazard_watch.models.assistant import AssistantRequest, AssistantStatusView
 from nisar_hazard_watch.ports.assistant_model import AnswerEvent, AnswerFinished, AssistantModel
 from nisar_hazard_watch.services.assistant_prompt import SYSTEM_PROMPT, prompt_turns
 
@@ -31,9 +31,11 @@ class AssistantService:
         self,
         model: AssistantModel | None,
         daily_token_limit: int,
+        model_name: str | None = None,
         today: Callable[[], date] = _utc_today,
     ) -> None:
         self._model = model
+        self._model_name = model_name
         self._daily_token_limit = daily_token_limit
         self._today = today
         self._day = today()
@@ -43,6 +45,13 @@ class AssistantService:
     def used_today(self) -> int:
         self._roll_over()
         return self._used
+
+    def status(self) -> AssistantStatusView:
+        """Available when a model is configured and today's budget is not used up."""
+        available = self._model is not None and self.used_today < self._daily_token_limit
+        return AssistantStatusView(
+            available=available, model=self._model_name if self._model is not None else None
+        )
 
     def ensure_available(self) -> AssistantModel:
         """Refuses before any answer starts, so the caller still gets a problem response."""

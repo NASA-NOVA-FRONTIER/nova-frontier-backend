@@ -183,3 +183,19 @@ def test_oversized_or_unexpected_input_is_rejected(
 
     # Assert
     assert response.status_code == 422
+
+
+def test_the_status_says_whether_claude_answers_and_with_which_model(
+    start_api: Callable[..., TestClient],
+) -> None:
+    # Arrange
+    without_key = start_api()
+    with_model = start_api(model=ScriptedModel(), assistant_model="claude-opus-5-5")
+
+    # Act
+    off = without_key.get(url=URL).json()
+    on = with_model.get(url=URL).json()
+
+    # Assert
+    assert off == {"available": False, "model": None}
+    assert on == {"available": True, "model": "claude-opus-5-5"}

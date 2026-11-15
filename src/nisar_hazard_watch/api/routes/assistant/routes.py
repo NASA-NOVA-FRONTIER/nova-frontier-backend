@@ -5,11 +5,11 @@ from collections.abc import AsyncIterator
 from fastapi import APIRouter
 from fastapi.responses import StreamingResponse
 
-from nisar_hazard_watch.api.dependencies import AssistantRateLimit, AssistantServiceDep
+from nisar_hazard_watch.api.dependencies import AssistantRateLimit, AssistantServiceDep, RateLimit
 from nisar_hazard_watch.constants.assistant import ASSISTANT_FAILED_DETAIL, AssistantEventName
 from nisar_hazard_watch.constants.errors import ReasonCode
 from nisar_hazard_watch.exceptions.app_error import AppError
-from nisar_hazard_watch.models.assistant import AssistantRequest
+from nisar_hazard_watch.models.assistant import AssistantRequest, AssistantStatusView
 from nisar_hazard_watch.ports.assistant_model import AnswerDelta
 from nisar_hazard_watch.services.assistant_service import AssistantService
 
@@ -59,3 +59,8 @@ async def ask_assistant(body: AssistantRequest, service: AssistantServiceDep) ->
         media_type=EVENT_STREAM,
         headers=STREAM_HEADERS,
     )
+
+
+@router.get("", response_model=AssistantStatusView, dependencies=[RateLimit])
+async def assistant_status(service: AssistantServiceDep) -> AssistantStatusView:
+    return service.status()

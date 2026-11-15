@@ -49,6 +49,13 @@ class AssistantContext(StrictModel):
     sources: list[LongText] = Field(default_factory=list, max_length=MAX_SOURCES)
 
 
+class AssistantStatusView(CamelModel):
+    """Whether Nova answers with Claude, so the chat can label its answers before anyone asks."""
+
+    available: bool
+    model: str | None = None
+
+
 class AssistantRequest(StrictModel):
     message: Annotated[
         str, StringConstraints(strip_whitespace=True, min_length=1, max_length=MAX_MESSAGE_CHARS)

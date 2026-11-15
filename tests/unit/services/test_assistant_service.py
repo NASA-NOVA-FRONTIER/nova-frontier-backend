@@ -76,3 +76,16 @@ async def test_once_the_daily_ceiling_is_reached_it_refuses_until_the_next_utc_d
     with pytest.raises(expected_exception=AssistantBudgetExhaustedError):
         service.ensure_available()
     assert service.ensure_available() is not None
+
+
+async def test_the_status_turns_unavailable_once_the_budget_is_used() -> None:
+    # Arrange
+    service = AssistantService(model=FakeModel(), daily_token_limit=TOKENS, model_name="m")
+    before = service.status()
+
+    # Act
+    await collect(service=service)
+
+    # Assert
+    assert (before.available, before.model) == (True, "m")
+    assert service.status().available is False

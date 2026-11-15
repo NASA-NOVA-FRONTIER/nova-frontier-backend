@@ -40,7 +40,7 @@ For a point or a drawn area it plans the scenes to read from the public ASF cata
 | `GET` | `/insar/pairs` | NISAR L-band interferometric pairs over a point, newest first |
 | `GET` | `/lenses` | The lenses, what each one shows and how many dates it needs |
 | `GET` | `/places` | Place search for the globe |
-| `POST` | `/assistant` | Nova's answer from Claude about the result on screen, streamed as server-sent events |
+| `GET`, `POST` | `/assistant` | Whether Nova answers with Claude; Nova's answer about the result on screen, streamed as server-sent events |
 | `GET` | `/health`, `/health/live` | Dependency report and liveness check |
 
 Details of each endpoint are in [API](#api).
@@ -134,6 +134,7 @@ Environment variables (see `.env.example`). The app fails at start-up on a malfo
 | `GET /api/v1/lenses` | The supported lenses and how many dates they need |
 | `GET /api/v1/insar/pairs?lon=&lat=&startDate=&endDate=` | NISAR L-band interferometric (GUNW) pairs over a point, newest first, listed from the public catalog through the ML gateway (default window: the last 180 days, at most 366). Rate-limited like explorations |
 | `GET /api/v1/coverage?lon=&lat=` | The scene plan for a point without running anything |
+| `GET /api/v1/assistant` | `{available, model}`: whether a key is set and today's budget is left, so the chat labels its answers before anyone asks |
 | `POST /api/v1/assistant` | Nova's answer `{message, history[], context}` (`context` is the frontend's summary of the result on screen, read by the model as data, never as instructions). Streams `text/event-stream`: `delta` events with text, then `done` or `error` (`ASSISTANT_DECLINED`, `UPSTREAM_ASSISTANT_ERROR`). Refused before streaming with `503 ASSISTANT_UNAVAILABLE` (no key), `429 RATE_LIMITED` or `429 ASSISTANT_BUDGET_EXHAUSTED`. The system prompt forbids causes, probabilities, hectares, displacement and invented numbers |
 | `GET /api/v1/cases` | The known cases measured ahead of time on the ML gateway (`/v2/cases`), in its order: id, title, point, status and the baseline and assessment dates. Kept in memory for 10 minutes and refreshed in the background, so a copy is served at once; after a gateway failure it is not called again for 60 s. With no copy the answer is `502 CASES_UNAVAILABLE`. Known `status` values: `partial`, `complete`, `not_displacement_ready`, `evaluated`. Rate-limited |
 | `GET /api/v1/cases/{id}` | One case: grid, series key, allow-listed evidence (cell counts, threshold policy, optical comparison, sources, pair, common support, radar signatures and their policy, radar comparator, regional context and lens; never area, hectares, probability, depth, displacement or cause), layers (with `title` and `kind`), visualizations, `limitations`, `scientificStatus` and `isDemo`. Unknown id: `404 CASE_NOT_FOUND`. Rate-limited |

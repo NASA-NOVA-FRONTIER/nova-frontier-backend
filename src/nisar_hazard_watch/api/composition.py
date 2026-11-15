@@ -124,4 +124,8 @@ def build_assistant_service(
 ) -> AssistantService:
     if model is None and client is not None:
         model = ClaudeAssistant(client=client, model=settings.assistant_model)
-    return AssistantService(model=model, daily_token_limit=settings.assistant_daily_token_limit)
+    return AssistantService(
+        model=model,
+        daily_token_limit=settings.assistant_daily_token_limit,
+        model_name=settings.assistant_model,
+    )
