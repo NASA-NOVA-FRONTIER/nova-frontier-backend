@@ -38,7 +38,10 @@ Results are diagnostic evidence: no forecasts, no probabilities, no causes.
 - [Project layout](#project-layout)
 - [Scene planning (SAR core)](#scene-planning-sar-core)
 - [Exploration flow](#exploration-flow)
+- [What we don't claim](#what-we-dont-claim)
+- [Data sources and citations](#data-sources-and-citations)
 - [Testing](#testing) · [Quality](#quality) · [CI](#ci) · [Deployment](#deployment)
+- [How to cite this project](#how-to-cite-this-project)
 - [License](#license)
 
 For a point or a drawn area it plans the scenes to read from the public ASF catalog, sends that plan to the ML gateway on Modal (`nova-frontier-model`), tracks the job and serves the result with its layers, `limitations` and `scientificStatus: "diagnostic"`. It also lists the cases measured ahead of time, the NISAR interferometric pairs over a point, the lenses and place search results for the globe. A `wildfire` answer adds NASA FIRMS active-fire detections as separate context.
@@ -223,6 +226,26 @@ tests/          unit/ (mirrors src), integration/ (Postgres), live/ (NASA)
 | Kumamoto, InSAR pair (track 24, 2026-07-21 to 2026-08-14) | 2026-11-12 | One GUNW pair | 62,500 coherent cells in the 5 km window; 39,584 with phase at the 0.35 threshold | 50 s |
 | Qadirabad, GCOV lens | 2026-11-12 | Five scenes | 1024 × 1024 cells | About 35 s of analysis plus rendering once warm; 47 s from a cold start |
 
+## What we don't claim
+
+| We never report | Why, as the code enforces it |
+|---|---|
+| Hectares or any burned, flooded or affected area | Every exploration carries the limitation "No forecast, probability, cause, area in hectares or displacement is reported." (`constants/explorations.py`); case evidence keys containing `area`, `hectares`, `km2`, `flooded`, `inundation` and similar words are never relayed (`FORBIDDEN_EVIDENCE_WORDS`) |
+| Displacement in cm or mm | The InSAR phase is wrapped and not corrected for troposphere or ionosphere, so `losDisplacementCm` is typed `None` and is always `null` (`models/insar_summary.py`, `INSAR_LIMITATIONS`) |
+| Probabilities | Results are `scientificStatus: "diagnostic"` (`SCIENTIFIC_STATUS`): diagnostic evidence from measured backscatter, "not a validated classifier" |
+| Causes | The wildfire limitation says a radar change over burnt land "does not establish a fire as the cause"; FIRMS detections are kept apart from the radar verdict and "no burned area is reported" (`constants/fire_context.py`) |
+| Forecasts | Every answer compares a measured target pass with earlier measured passes; no field or service predicts a future state, and the limitation says so |
+
+## Data sources and citations
+
+| Product | Provider | Used by | Terms | How to cite |
+|---|---|---|---|---|
+| NISAR L2 GCOV (`NISAR_L2_GCOV_V1`, `_PROVISIONAL_V1`, `_BETA_V1`, `UR_L2_L_GCOV`) and L2 GUNW | NASA-ISRO NISAR, archived by the ASF DAAC | Scene plan (ASF SearchAPI) and the ML gateway's reads | NASA mission data are CC0 unless a product states otherwise; "there are no restrictions on the use of these data" ([NASA data use guidance](https://www.earthdata.nasa.gov/engage/open-data-services-software-policies/data-use-guidance)) | "NISAR follows NASA's standard Data Use and Citation Guidance" ([ASF NISAR docs](https://nisar-docs.asf.alaska.edu/data-use-citation-guidance/)): cite each dataset in the text and in the reference list, and acknowledge NASA as the source |
+| NASA CMR (Common Metadata Repository) | NASA Earthdata | `/api/v1/health` probe; granule search on the ML gateway | As above | As above |
+| OPERA DSWx-HLS (`OPERA_L3_DSWX-HLS_V1`) | NASA JPL OPERA, archived by PO.DAAC | The ML gateway's optical evidence (flood lens) | See the [PO.DAAC dataset page](https://podaac.jpl.nasa.gov/dataset/OPERA_L3_DSWX-HLS_V1) | Use the suggested citation on the [PO.DAAC dataset page](https://podaac.jpl.nasa.gov/dataset/OPERA_L3_DSWX-HLS_V1) |
+| NASA FIRMS VIIRS 375 m active fires (Suomi NPP and NOAA-20, standard and near real time) | NASA LANCE / ESDIS | Wildfire `fireContext` | Free MAP_KEY; NASA data use guidance applies | "We acknowledge the use of data and/or imagery from NASA's Fire Information for Resource Management System (FIRMS), part of NASA's Land, Atmosphere Near real-time Capability for Earth observations (LANCE) and NASA's Earth Science Data and Information System (ESDIS)." ([Earthdata FIRMS](https://www.earthdata.nasa.gov/learn/find-data/near-real-time/firms)). Algorithm: Schroeder et al. (2014), doi:[10.1016/j.rse.2013.12.008](https://doi.org/10.1016/j.rse.2013.12.008) |
+| OpenStreetMap Nominatim | OpenStreetMap Foundation | `GET /api/v1/places` | ODbL ([OSM copyright](https://www.openstreetmap.org/copyright)); [usage policy](https://operations.osmfoundation.org/policies/nominatim/): "an absolute maximum of 1 request per second", an identifying User-Agent, "Results must be cached on your side", no client-side autocomplete | "© OpenStreetMap contributors" (returned as `attribution` in every places answer). The backend keeps the policy: one request per 1.1 s, a User-Agent naming this repository, a 24 h cache, search on submit only |
+
 ## Testing
 
 ```bash
@@ -246,6 +269,15 @@ uv run pre-commit install
 ## Deployment
 
 Railway builds the `Dockerfile`, runs `alembic upgrade head` before each deploy (`railway.toml`) and health-checks `/api/v1/health/live`. Variables: `DATABASE_URL` (reference of the Postgres service), `CORS_ALLOWED_ORIGINS`, `ENVIRONMENT=production`, `LOG_LEVEL`. **`main` is production**: change it only through reviewed pull requests with green CI.
+
+## How to cite this project
+
+```text
+Nova Frontier (2026). NISAR Hazard Watch — Backend. NASA Space Apps Challenge 2026.
+https://github.com/NASA-NOVA-FRONTIER/nova-frontier-backend
+```
+
+GitHub's "Cite this repository" button reads [`CITATION.cff`](CITATION.cff). Cite the data products above as well.
 
 ## License
 
