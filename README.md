@@ -1,5 +1,7 @@
 <div align="center">
 
+<img src=".github/assets/hero.jpg" alt="The NISAR Hazard Watch web app that this API serves: its landing page, with the headline &quot;Earth, without the clouds.&quot; over a 3D Earth and the Open the explorer and The Chenab flood buttons" width="100%">
+
 # NISAR Hazard Watch — Backend
 
 **The API behind the radar evidence explorer.**
