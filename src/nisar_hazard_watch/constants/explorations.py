@@ -149,6 +149,9 @@ ETA_PERCENTILE = 0.8
 ETA_MIN_SAMPLES = 3
 # Coverage answers for the lens "Analyze this spot" runs first, unless the request names another.
 DEFAULT_COVERAGE_LENS = Lens.FLOOD_WETLAND
+# The lenses whose explorations the frontend starts with opticalEvidence (exploreApi.ts `bodyOf`),
+# so coverage checks the same cache entry when the caller doesn't say.
+DEFAULT_OPTICAL_LENSES = frozenset({Lens.FLOOD_WETLAND})
 STAGE_BUDGETS_SECONDS = {
     StageName.PLANNING: 2.0,
     StageName.READING: 105.0,

@@ -380,6 +380,28 @@ def test_coverage_estimates_the_lens_it_is_asked_about(
     assert unknown.status_code == 422
 
 
+def test_coverage_checks_the_cache_with_the_optical_evidence_it_is_sent(
+    start_api: Callable[..., TestClient],
+) -> None:
+    # Arrange
+    client = start_api()
+    point = {"lon": QADIRABAD_LON, "lat": QADIRABAD_LAT}
+    client.post(url=URL, json={**BODY, "opticalEvidence": True})
+
+    # Act
+    flood_default = client.get(url="/api/v1/coverage", params=point)
+    with_optical = client.get(url="/api/v1/coverage", params={**point, "opticalEvidence": "true"})
+    without_optical = client.get(
+        url="/api/v1/coverage", params={**point, "opticalEvidence": "false"}
+    )
+
+    # Assert
+    assert flood_default.json()["cache"] == "hit"
+    assert flood_default.json()["etaSeconds"] == 0
+    assert with_optical.json()["cache"] == "hit"
+    assert without_optical.json()["cache"] == "miss"
+
+
 def test_the_openapi_document_lists_the_new_endpoints(
     start_api: Callable[..., TestClient],
 ) -> None:

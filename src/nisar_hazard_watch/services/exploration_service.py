@@ -12,6 +12,7 @@ from nisar_hazard_watch.constants.explorations import (
     ACTIVE_STATUSES,
     AREA_BUCKET_KM2_STEP,
     DEFAULT_COVERAGE_LENS,
+    DEFAULT_OPTICAL_LENSES,
     ETA_TIMING_KEY,
     EXPLORATION_ID_PREFIX,
     GEOJSON_POINT,
@@ -312,8 +313,10 @@ class ExplorationService:
         self,
         geometry: dict[str, Any],
         lens: Lens = DEFAULT_COVERAGE_LENS,
-        optical_evidence: bool = False,
+        optical_evidence: bool | None = None,
     ) -> CoverageView:
+        if optical_evidence is None:
+            optical_evidence = lens in DEFAULT_OPTICAL_LENSES
         aoi = self._aoi(geometry=geometry)
         plan = await self._planner.plan(aoi=aoi)
         longitude, latitude = aoi_center(aoi=aoi)
@@ -361,8 +364,12 @@ class ExplorationService:
             posting = posting[0] if posting else None
         width = quality.get(QUALITY_GRID_WIDTH)
         height = quality.get(QUALITY_GRID_HEIGHT)
+        # bool is an int subclass; a True width is not a grid.
         if not (
-            isinstance(width, int) and isinstance(height, int) and isinstance(posting, int | float)
+            type(width) is int
+            and type(height) is int
+            and isinstance(posting, int | float)
+            and not isinstance(posting, bool)
         ):
             return None
         return CoverageGrid(width=width, height=height, posting_m=float(posting))

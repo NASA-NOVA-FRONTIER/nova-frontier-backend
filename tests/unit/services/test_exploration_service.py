@@ -700,7 +700,7 @@ async def test_coverage_reports_a_cache_hit_with_the_grid_the_job_used(
 ) -> None:
     # Arrange
     service = make_service()
-    first, _ = await service.create(request=_request())
+    first, _ = await service.create(request=_request(optical_evidence=True))
     _succeeded(runner, quality=GRID_QUALITY)
     await service.get(exploration_id=first.id)
 
@@ -725,16 +725,32 @@ async def test_coverage_checks_the_cache_for_the_lens_and_optical_flag_it_is_ask
     await service.get(exploration_id=first.id)
 
     # Act
-    without_optical = await service.coverage(geometry=POINT)
-    with_optical = await service.coverage(geometry=POINT, optical_evidence=True)
+    flood_default = await service.coverage(geometry=POINT)
+    without_optical = await service.coverage(geometry=POINT, optical_evidence=False)
     other_lens = await service.coverage(geometry=POINT, lens=Lens.WILDFIRE, optical_evidence=True)
 
     # Assert
+    assert flood_default.cache is CacheState.HIT
+    assert flood_default.grid is None
     assert without_optical.cache is CacheState.MISS
-    assert with_optical.cache is CacheState.HIT
-    assert with_optical.grid is None
     assert other_lens.cache is CacheState.MISS
     assert other_lens.lens is Lens.WILDFIRE
+
+
+async def test_coverage_without_optical_evidence_assumes_what_the_frontend_sends(
+    make_service: Factory, runner: ScriptedRunner
+) -> None:
+    # Arrange
+    service = make_service()
+    wildfire, _ = await service.create(request=_request(lens=Lens.WILDFIRE))
+    _succeeded(runner)
+    await service.get(exploration_id=wildfire.id)
+
+    # Act
+    coverage = await service.coverage(geometry=POINT, lens=Lens.WILDFIRE)
+
+    # Assert
+    assert coverage.cache is CacheState.HIT
 
 
 async def test_coverage_gives_no_wait_when_nothing_would_run(
@@ -742,10 +758,11 @@ async def test_coverage_gives_no_wait_when_nothing_would_run(
 ) -> None:
     # Arrange
     service = make_service()
-    insar = await service.coverage(geometry=POINT, lens=Lens.INSAR)
-    planner.plan_result = make_plan(scenes=[], status=PlanStatus.NO_COVERAGE)
+    uncovered_plan = make_plan(scenes=[], status=PlanStatus.NO_COVERAGE)
 
     # Act
+    insar = await service.coverage(geometry=POINT, lens=Lens.INSAR)
+    planner.plan_result = uncovered_plan
     uncovered = await service.coverage(geometry=POINT)
 
     # Assert
