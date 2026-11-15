@@ -1,6 +1,34 @@
+<div align="center">
+
+<img src=".github/assets/architecture.png" alt="Architecture diagram of the NISAR Hazard Watch backend" width="100%">
+
 # NISAR Hazard Watch — Backend
 
-FastAPI backend for **NISAR Hazard Watch**, the NASA Space Apps 2026 project that reads NISAR radar to show surface change after earthquakes, fires, floods and forest loss. For a point or a drawn area it plans the scenes to read from the public ASF catalog, sends that plan to the ML gateway on Modal (`nova-frontier-model`), tracks the job and serves the result with its layers, `limitations` and `scientificStatus: "diagnostic"`. It also lists the cases measured ahead of time, the NISAR interferometric pairs over a point, the lenses and place search results for the globe. A `wildfire` answer adds NASA FIRMS active-fire detections as separate context.
+**The API behind the radar evidence explorer.**
+
+A FastAPI service that plans which NISAR L-band scenes to read from the public ASF catalog, runs the
+analysis on the ML gateway on Modal and serves each result with its layers and its limitations.
+Results are diagnostic evidence: no forecasts, no probabilities, no causes.
+
+[![API docs](https://img.shields.io/badge/api%20docs-swagger%20ui-c9b48b?style=for-the-badge&labelColor=04070e)](https://nova-frontier-backend-main.up.railway.app/docs)
+[![Live app](https://img.shields.io/badge/live%20app-open%20the%20explorer-c9b48b?style=for-the-badge&labelColor=04070e)](https://nova-frontier-frontend.vercel.app)
+
+[![CI](https://github.com/NASA-NOVA-FRONTIER/nova-frontier-backend/actions/workflows/ci.yml/badge.svg)](https://github.com/NASA-NOVA-FRONTIER/nova-frontier-backend/actions/workflows/ci.yml)
+![Python](https://img.shields.io/badge/Python-3.13-3776ab?logo=python&logoColor=white)
+![FastAPI](https://img.shields.io/badge/FastAPI-async-009688?logo=fastapi&logoColor=white)
+![uv](https://img.shields.io/badge/uv-locked-de5fe9?logo=uv&logoColor=white)
+![PostgreSQL](https://img.shields.io/badge/PostgreSQL-17-4169e1?logo=postgresql&logoColor=white)
+![Railway](https://img.shields.io/badge/Railway-deployed-0b0d0e?logo=railway&logoColor=white)
+![Modal](https://img.shields.io/badge/Modal-ML%20gateway-7fee64)
+![NASA Space Apps 2026](https://img.shields.io/badge/NASA%20Space%20Apps-2026-0b3d91)
+
+**[Frontend](https://github.com/NASA-NOVA-FRONTIER/nova-frontier-frontend)** ·
+**[Model](https://github.com/NASA-NOVA-FRONTIER/nova-frontier-model)** ·
+**[Live demo](https://nova-frontier-frontend.vercel.app)**
+
+</div>
+
+For a point or a drawn area it plans the scenes to read from the public ASF catalog, sends that plan to the ML gateway on Modal (`nova-frontier-model`), tracks the job and serves the result with its layers, `limitations` and `scientificStatus: "diagnostic"`. It also lists the cases measured ahead of time, the NISAR interferometric pairs over a point, the lenses and place search results for the globe. A `wildfire` answer adds NASA FIRMS active-fire detections as separate context.
 
 | Method | Path (under `/api/v1`) | Answers |
 |---|---|---|
