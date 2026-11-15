@@ -7,6 +7,11 @@ from pydantic import Field, SecretStr, field_validator, model_validator
 from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
 
 from nisar_hazard_watch import __version__
+from nisar_hazard_watch.constants.assistant import (
+    DEFAULT_ASSISTANT_DAILY_TOKEN_LIMIT,
+    DEFAULT_ASSISTANT_MODEL,
+    DEFAULT_ASSISTANT_RATE_LIMIT_PER_MINUTE,
+)
 from nisar_hazard_watch.constants.environments import Environment
 from nisar_hazard_watch.constants.explorations import RunnerKind
 from nisar_hazard_watch.constants.log_levels import LogLevel
@@ -24,7 +29,13 @@ DEFAULT_TRUSTED_PROXY_HOPS = 2
 DEFAULT_EXPLORATION_DEADLINE_SECONDS = 480.0
 DEFAULT_ETA_PRIOR_SECONDS = 140.0
 ORIGIN_PATTERN = re.compile(r"^https?://[^/\s]+$")
-SECRET_FIELDS = ("earthdata_token", "modal_token_id", "modal_token_secret", "firms_map_key")
+SECRET_FIELDS = (
+    "earthdata_token",
+    "modal_token_id",
+    "modal_token_secret",
+    "firms_map_key",
+    "anthropic_api_key",
+)
 
 
 class Settings(BaseSettings):
@@ -62,6 +73,13 @@ class Settings(BaseSettings):
     modal_token_id: SecretStr | None = None
     modal_token_secret: SecretStr | None = None
     firms_map_key: SecretStr | None = None
+    # Nova's Claude answers (#31): without a key the chat keeps its rule-based answers.
+    anthropic_api_key: SecretStr | None = None
+    assistant_model: str = Field(default=DEFAULT_ASSISTANT_MODEL, min_length=1)
+    assistant_rate_limit_per_minute: int = Field(
+        default=DEFAULT_ASSISTANT_RATE_LIMIT_PER_MINUTE, ge=1
+    )
+    assistant_daily_token_limit: int = Field(default=DEFAULT_ASSISTANT_DAILY_TOKEN_LIMIT, ge=1)
 
     @field_validator("log_level", mode="before")
     @classmethod

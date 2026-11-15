@@ -2,6 +2,10 @@ import pytest
 from pydantic import ValidationError
 
 from nisar_hazard_watch.config.settings import Settings, get_settings
+from nisar_hazard_watch.constants.assistant import (
+    DEFAULT_ASSISTANT_DAILY_TOKEN_LIMIT,
+    DEFAULT_ASSISTANT_MODEL,
+)
 from nisar_hazard_watch.constants.environments import Environment
 from nisar_hazard_watch.constants.explorations import RunnerKind
 from nisar_hazard_watch.constants.log_levels import LogLevel
@@ -120,6 +124,7 @@ def test_blank_secrets_count_as_missing(monkeypatch: pytest.MonkeyPatch, blank: 
     monkeypatch.setenv(name="EARTHDATA_TOKEN", value=blank)
     monkeypatch.setenv(name="MODAL_TOKEN_ID", value=blank)
     monkeypatch.setenv(name="FIRMS_MAP_KEY", value=blank)
+    monkeypatch.setenv(name="ANTHROPIC_API_KEY", value=blank)
 
     # Act
     settings = Settings()
@@ -128,6 +133,7 @@ def test_blank_secrets_count_as_missing(monkeypatch: pytest.MonkeyPatch, blank: 
     assert settings.earthdata_token is None
     assert settings.modal_token_id is None
     assert settings.firms_map_key is None
+    assert settings.anthropic_api_key is None
 
 
 def test_the_log_level_is_accepted_in_any_case(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -260,3 +266,31 @@ def test_the_firms_key_is_a_secret_and_the_service_defaults_to_nasa(
     assert settings.firms_map_key.get_secret_value() == SECRET_VALUE
     assert SECRET_VALUE not in repr(settings)
     assert settings.firms_url == "https://firms.modaps.eosdis.nasa.gov"
+
+
+def test_the_anthropic_key_is_a_secret_and_the_model_is_a_variable(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # Arrange
+    monkeypatch.setenv(name="ANTHROPIC_API_KEY", value=SECRET_VALUE)
+    monkeypatch.setenv(name="ASSISTANT_MODEL", value="claude-sonnet-5-5")
+
+    # Act
+    settings = Settings()
+
+    # Assert
+    assert settings.anthropic_api_key is not None
+    assert settings.anthropic_api_key.get_secret_value() == SECRET_VALUE
+    assert SECRET_VALUE not in repr(settings)
+    assert settings.assistant_model == "claude-sonnet-5-5"
+
+
+def test_the_assistant_defaults_to_opus_with_a_tight_limit_and_a_daily_ceiling() -> None:
+    # Act
+    settings = Settings()
+
+    # Assert
+    assert settings.anthropic_api_key is None
+    assert settings.assistant_model == DEFAULT_ASSISTANT_MODEL
+    assert settings.assistant_rate_limit_per_minute < settings.rate_limit_per_minute
+    assert settings.assistant_daily_token_limit == DEFAULT_ASSISTANT_DAILY_TOKEN_LIMIT
