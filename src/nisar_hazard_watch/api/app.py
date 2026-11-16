@@ -3,13 +3,16 @@ from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 
 import httpx
+from anthropic import AsyncAnthropic
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from nisar_hazard_watch.adapters.db.engine import create_engine
 from nisar_hazard_watch.api.body_limit_middleware import BodyLimitMiddleware
 from nisar_hazard_watch.api.composition import (
+    build_assistant_service,
     build_case_service,
+    build_daily_limits,
     build_exploration_service,
     build_health_service,
     build_insar_pairs_service,
@@ -19,10 +22,12 @@ from nisar_hazard_watch.api.error_handlers import register_error_handlers
 from nisar_hazard_watch.api.request_id_middleware import RequestIdMiddleware
 from nisar_hazard_watch.api.routes.router import register_routes
 from nisar_hazard_watch.config.settings import Settings, get_settings
+from nisar_hazard_watch.constants.assistant import ASSISTANT_MAX_RETRIES, ASSISTANT_TIMEOUT_SECONDS
 from nisar_hazard_watch.constants.explorations import BODY_LIMIT_BYTES
 from nisar_hazard_watch.constants.headers import REQUEST_ID_HEADER
 from nisar_hazard_watch.constants.places import GEOCODER_USER_AGENT
 from nisar_hazard_watch.ports.analysis_runner import AnalysisRunner
+from nisar_hazard_watch.ports.assistant_model import AssistantModel
 from nisar_hazard_watch.utils.logging import configure_logging
 from nisar_hazard_watch.utils.rate_limiter import RateLimiter
 
@@ -42,6 +47,7 @@ def create_app(
     firms_transport: httpx.AsyncBaseTransport | None = None,
     geocoder_transport: httpx.AsyncBaseTransport | None = None,
     runner: AnalysisRunner | None = None,
+    assistant_model: AssistantModel | None = None,
 ) -> FastAPI:
     settings = settings or get_settings()
     configure_logging(level=settings.log_level)
@@ -49,6 +55,16 @@ def create_app(
     @asynccontextmanager
     async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         engine = create_engine(database_url=settings.database_url)
+        key = settings.anthropic_api_key
+        anthropic_client = (
+            AsyncAnthropic(
+                api_key=key.get_secret_value(),
+                timeout=ASSISTANT_TIMEOUT_SECONDS,
+                max_retries=ASSISTANT_MAX_RETRIES,
+            )
+            if key is not None and assistant_model is None
+            else None
+        )
         try:
             async with (
                 httpx.AsyncClient(
@@ -72,12 +88,14 @@ def create_app(
                 app.state.health_service = build_health_service(
                     settings=settings, engine=engine, http_client=http_client
                 )
+                app.state.daily_limits = build_daily_limits(settings=settings, engine=engine)
                 app.state.exploration_service = build_exploration_service(
                     settings=settings,
                     engine=engine,
                     asf_client=asf_client,
                     gateway_client=gateway_client,
                     firms_client=firms_client,
+                    limits=app.state.daily_limits,
                     runner=runner,
                 )
                 app.state.insar_pairs_service = build_insar_pairs_service(
@@ -93,6 +111,13 @@ def create_app(
                     max_requests=settings.rate_limit_per_minute, window_seconds=RATE_WINDOW_SECONDS
                 )
                 app.state.trusted_proxy_hops = settings.trusted_proxy_hops
+                app.state.assistant_service = build_assistant_service(
+                    settings=settings, client=anthropic_client, model=assistant_model
+                )
+                app.state.assistant_rate_limiter = RateLimiter(
+                    max_requests=settings.assistant_rate_limit_per_minute,
+                    window_seconds=RATE_WINDOW_SECONDS,
+                )
                 logger.info(
                     "starting %s %s environment=%s cors_origins=%s",
                     settings.service_name,
@@ -102,6 +127,8 @@ def create_app(
                 )
                 yield
         finally:
+            if anthropic_client is not None:
+                await anthropic_client.close()
             await engine.dispose()
 
     app = FastAPI(title="NISAR Hazard Watch API", version=settings.version, lifespan=lifespan)

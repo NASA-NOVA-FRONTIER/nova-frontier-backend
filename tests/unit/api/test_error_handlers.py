@@ -165,3 +165,28 @@ def test_an_unexpected_error_hides_its_details_and_keeps_the_request_id() -> Non
     assert UNEXPECTED_MESSAGE not in response.text
     assert body["requestId"]
     assert response.headers[REQUEST_ID_HEADER] == body["requestId"]
+
+
+class ThrottledError(AppError):
+    status_code = 429
+    reason_code = ReasonCode.RATE_LIMITED
+    title = "Throttled"
+
+
+def test_an_application_error_can_carry_response_headers() -> None:
+    # Arrange
+    app = FastAPI()
+    register_error_handlers(app=app)
+
+    @app.get("/throttled")
+    async def throttled() -> None:
+        raise ThrottledError(detail="slow down", headers={"Retry-After": RETRY_AFTER_SECONDS})
+
+    client = TestClient(app)
+
+    # Act
+    response = client.get(url="/throttled")
+
+    # Assert
+    assert response.status_code == 429
+    assert response.headers["Retry-After"] == RETRY_AFTER_SECONDS

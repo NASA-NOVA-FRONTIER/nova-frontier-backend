@@ -313,3 +313,44 @@ async def test_recent_totals_are_the_seconds_of_comparable_succeeded_runs(
     assert len(totals) == 2
     assert sorted(totals) == [30.0, 40.0] or sorted(totals) == [40.0, 50.0]
     assert 5.0 not in totals
+
+
+async def test_new_runs_are_counted_since_a_moment_for_everyone_or_for_one_client(
+    repository: SqlJobRepository,
+) -> None:
+    # Arrange
+    midnight = NOW.replace(hour=0, minute=0)
+    await repository.add(job=make_job(id="exp_1", runner_id="r1", client_key="a", created_at=NOW))
+    await repository.add(job=make_job(id="exp_2", runner_id="r2", client_key="a", created_at=NOW))
+    await repository.add(job=make_job(id="exp_3", runner_id="r3", client_key="b", created_at=NOW))
+    await repository.add(
+        job=make_job(
+            id="exp_4", runner_id="r4", client_key="a", created_at=midnight - timedelta(seconds=1)
+        )
+    )
+
+    # Act
+    everyone = await repository.count_new_since(since=midnight)
+    only_a = await repository.count_new_since(since=midnight, client_key="a")
+
+    # Assert
+    assert everyone == 3
+    assert only_a == 2
+
+
+async def test_runs_that_never_reached_the_runner_or_came_from_its_cache_are_not_counted(
+    repository: SqlJobRepository,
+) -> None:
+    # Arrange
+    midnight = NOW.replace(hour=0, minute=0)
+    await repository.add(job=make_job(id="exp_1", runner_id=None, created_at=NOW))
+    await repository.add(
+        job=make_job(id="exp_2", runner_id="r2", counts_toward_limits=False, created_at=NOW)
+    )
+    await repository.add(job=make_job(id="exp_3", runner_id="r3", created_at=NOW))
+
+    # Act
+    counted = await repository.count_new_since(since=midnight)
+
+    # Assert
+    assert counted == 1

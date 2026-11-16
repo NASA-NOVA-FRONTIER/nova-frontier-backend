@@ -1,1 +1,4 @@
 REQUEST_ID_HEADER = "X-Request-ID"
+RETRY_AFTER_HEADER = "Retry-After"
+AUTHORIZATION_HEADER = "Authorization"
+BEARER_PREFIX = "Bearer "

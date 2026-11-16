@@ -1,8 +1,10 @@
 import httpx
+from anthropic import AsyncAnthropic
 from sqlalchemy.ext.asyncio import AsyncEngine, async_sessionmaker
 
 from nisar_hazard_watch.adapters.asf.asf_catalog import AsfCatalog
 from nisar_hazard_watch.adapters.cases.static_precomputed_cases import StaticPrecomputedCases
+from nisar_hazard_watch.adapters.claude.claude_assistant import ClaudeAssistant
 from nisar_hazard_watch.adapters.credentials.configured_probe import ConfiguredProbe
 from nisar_hazard_watch.adapters.db.database_probe import DatabaseProbe
 from nisar_hazard_watch.adapters.db.job_repository import SqlJobRepository
@@ -24,7 +26,10 @@ from nisar_hazard_watch.constants.health import DependencyName
 from nisar_hazard_watch.hazards.earthquake.insar_pairs_service import InsarPairsService
 from nisar_hazard_watch.hazards.wildfire.fire_context_provider import FirmsFireContextProvider
 from nisar_hazard_watch.ports.analysis_runner import AnalysisRunner
+from nisar_hazard_watch.ports.assistant_model import AssistantModel
+from nisar_hazard_watch.services.assistant_service import AssistantService
 from nisar_hazard_watch.services.case_service import CaseService
+from nisar_hazard_watch.services.daily_limits import DailyLimits
 from nisar_hazard_watch.services.eta_estimator import EtaEstimator
 from nisar_hazard_watch.services.exploration_service import ExplorationService
 from nisar_hazard_watch.services.health_service import HealthService
@@ -73,22 +78,38 @@ def build_case_service(settings: Settings, gateway_client: httpx.AsyncClient) ->
     )
 
 
+def build_daily_limits(settings: Settings, engine: AsyncEngine) -> DailyLimits:
+    return DailyLimits(
+        repository=SqlJobRepository(
+            session_factory=async_sessionmaker(engine, expire_on_commit=False)
+        ),
+        app_limit=settings.daily_limit_app,
+        client_limit=settings.daily_limit_client,
+    )
+
+
 def build_exploration_service(
     settings: Settings,
     engine: AsyncEngine,
     asf_client: httpx.AsyncClient,
     gateway_client: httpx.AsyncClient,
     firms_client: httpx.AsyncClient,
+    limits: DailyLimits,
     runner: AnalysisRunner | None = None,
 ) -> ExplorationService:
     repository = SqlJobRepository(
         session_factory=async_sessionmaker(engine, expire_on_commit=False)
     )
     if runner is None:
+        shared_secret = settings.gateway_shared_secret
         runner = (
             InProcessRunner()
             if settings.runner is RunnerKind.IN_PROCESS
-            else GatewayRunner(client=gateway_client, base_url=settings.ml_gateway_url)
+            else GatewayRunner(
+                client=gateway_client,
+                base_url=settings.ml_gateway_url,
+                shared_secret=shared_secret.get_secret_value() if shared_secret else None,
+            )
         )
     fire_source = (
         FirmsClient(
@@ -109,6 +130,7 @@ def build_exploration_service(
         fire_context=FirmsFireContextProvider(
             source=fire_source, timeout_seconds=settings.fire_context_timeout_seconds
         ),
+        limits=limits,
     )
 
 
@@ -117,4 +139,16 @@ def build_place_search_service(
 ) -> PlaceSearchService:
     return PlaceSearchService(
         geocoder=NominatimGeocoder(client=geocoder_client, base_url=settings.geocoder_url)
+    )
+
+
+def build_assistant_service(
+    settings: Settings, client: AsyncAnthropic | None, model: AssistantModel | None = None
+) -> AssistantService:
+    if model is None and client is not None:
+        model = ClaudeAssistant(client=client, model=settings.assistant_model)
+    return AssistantService(
+        model=model,
+        daily_token_limit=settings.assistant_daily_token_limit,
+        model_name=settings.assistant_model,
     )

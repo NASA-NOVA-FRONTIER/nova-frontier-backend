@@ -29,6 +29,10 @@ class ExplorationJob(CamelModel):
     created_at: datetime
     finished_at: datetime | None = None
     deadline_at: datetime
+    # Who asked (a digest, see hash_client_key) and whether this run spends today's allowance;
+    # a result the gateway already had in its cache does not.
+    client_key: str | None = None
+    counts_toward_limits: bool = True
 
 
 class JobRepository(Protocol):
@@ -48,6 +52,10 @@ class JobRepository(Protocol):
 
     async def count_queued_ahead(self, job: ExplorationJob, now: datetime) -> int:
         """Queued jobs still inside their deadline that were created before `job`."""
+        ...
+
+    async def count_new_since(self, since: datetime, client_key: str | None = None) -> int:
+        """Runs submitted since `since` that spend the daily allowance, for one client or all."""
         ...
 
     async def find_fresh(self, cache_key: str, newer_than: datetime) -> ExplorationJob | None: ...

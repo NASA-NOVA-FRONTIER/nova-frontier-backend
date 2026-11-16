@@ -20,6 +20,7 @@ from nisar_hazard_watch.ports.analysis_runner import (
 )
 from nisar_hazard_watch.ports.fire_context_provider import FireContextProvider
 from nisar_hazard_watch.ports.precomputed_cases import PrecomputedCases
+from nisar_hazard_watch.services.daily_limits import DailyLimits
 from nisar_hazard_watch.services.eta_estimator import EtaEstimator
 from nisar_hazard_watch.services.exploration_service import ExplorationService
 from tests.factories import make_plan
@@ -135,6 +136,7 @@ def make_service(
         cases: PrecomputedCases | None = None,
         max_active: int = MAX_ACTIVE,
         fire_context: FireContextProvider | None = None,
+        limits: DailyLimits | None = None,
     ) -> ExplorationService:
         return ExplorationService(
             planner=planner,  # type: ignore[arg-type]
@@ -146,6 +148,7 @@ def make_service(
             deadline_seconds=DEADLINE_SECONDS,
             cache_ttl_seconds=CACHE_TTL_SECONDS,
             fire_context=fire_context,
+            limits=limits,
             clock=clock,
         )
 

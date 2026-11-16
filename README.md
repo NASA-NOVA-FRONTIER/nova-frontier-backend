@@ -40,6 +40,7 @@ For a point or a drawn area it plans the scenes to read from the public ASF cata
 | `GET` | `/insar/pairs` | NISAR L-band interferometric pairs over a point, newest first |
 | `GET` | `/lenses` | The lenses, what each one shows and how many dates it needs |
 | `GET` | `/places` | Place search for the globe |
+| `GET`, `POST` | `/assistant` | Whether Nova answers with Claude; Nova's answer about the result on screen, streamed as server-sent events |
 | `GET` | `/health`, `/health/live` | Dependency report and liveness check |
 
 Details of each endpoint are in [API](#api).
@@ -103,6 +104,8 @@ Environment variables (see `.env.example`). The app fails at start-up on a malfo
 | `EXPLORATION_DEADLINE_SECONDS` | `480` | A running exploration becomes `partial` with `TIMEOUT_PARTIAL` after this deadline. The production worker has up to 420 s plus gateway admission and startup. Cache hits can return immediately. |
 | `EXPLORATION_CACHE_TTL_SECONDS` | `86400` | A finished exploration with the same lens, area and scenes is reused for this long |
 | `RATE_LIMIT_PER_MINUTE` | `20` | Requests per client to the exploration and coverage endpoints |
+| `DAILY_LIMIT_CLIENT`, `DAILY_LIMIT_APP` | `20`, `250` | New analyses a day (UTC) per client and for the whole app. Cache hits never count; the app limit stays under the 300 jobs a day the ML gateway admits. `GET /api/v1/limits` shows what is left |
+| `GATEWAY_SHARED_SECRET` | unset | Bearer token sent on every job submission to the ML gateway (`Authorization: Bearer ...`). Never logged or returned. Set it in Railway and in the gateway's Modal Secret before the gateway starts requiring it |
 | `TRUSTED_PROXY_HOPS` | `2` | Entries the proxies in front of the API append to `X-Forwarded-For` (measured on Railway's edge: 2; with 1 every request landed in a different bucket and the limit never fired; recount if another proxy such as a Vercel rewrite is added). The client is that many entries from the right, so a spoofed leading address cannot dodge the limit; `0` ignores the header and uses the socket peer |
 | `ETA_PRIOR_SECONDS` | `140` | ETA until three comparable runs exist; then the p80 of the last 50 |
 | `ASF_TIMEOUT_SECONDS`, `GATEWAY_TIMEOUT_SECONDS` | `30`, `20` | HTTP timeouts towards the ASF catalog and the ML gateway (> 0) |
@@ -113,6 +116,9 @@ Environment variables (see `.env.example`). The app fails at start-up on a malfo
 | `FIRMS_MAP_KEY` | unset | Free NASA FIRMS key for the wildfire lens' independent fire context; without it the wildfire answer says `notConfigured` and stays radar-only. It travels in the FIRMS URL path, so `httpx` request logging is silenced; never logged or returned |
 | `FIRMS_URL` | `https://firms.modaps.eosdis.nasa.gov` | FIRMS base URL |
 | `FIRMS_TIMEOUT_SECONDS`, `FIRE_CONTEXT_TIMEOUT_SECONDS` | `10`, `15` | Per-request timeout and total budget of the fire context lookup (> 0); a slower lookup is reported as `unavailable`, never as an error |
+| `ANTHROPIC_API_KEY` | unset | Claude key for Nova's answers (`POST /api/v1/assistant`). Without it the endpoint answers `503 ASSISTANT_UNAVAILABLE` and the chat keeps its rule-based answers. A Railway variable only; never logged or returned |
+| `ASSISTANT_MODEL` | `claude-opus-5-5` | The Claude model behind Nova. Server-side fallback on a declined answer is sent only for models that accept it |
+| `ASSISTANT_RATE_LIMIT_PER_MINUTE`, `ASSISTANT_DAILY_TOKEN_LIMIT` | `6`, `1000000` | Questions per client per minute, and the tokens (in and out) all clients may use per UTC day; above it the endpoint answers `429 ASSISTANT_BUDGET_EXHAUSTED` until 00:00 UTC |
 
 ## API
 
@@ -128,8 +134,11 @@ Environment variables (see `.env.example`). The app fails at start-up on a malfo
 | `GET /api/v1/explorations/{id}/assets/{name}` | `307` redirect to a published artifact from this job. The result includes its media type, size and SHA-256. |
 | `GET /api/v1/places?q=&limit=` | Place search for the globe (OpenStreetMap Nominatim behind a 24 h cache and a one-request-per-second throttle, as its policy asks; send it on submit, never per keystroke). Answers `places[]` with `point`, `bbox` and `attribution` |
 | `GET /api/v1/lenses` | The supported lenses and how many dates they need |
+| `GET /api/v1/limits` | What is left of today's new analyses: `remainingApp`, `remainingClient`, `resetsAt` (UTC) and the limits themselves. A `429` from the exploration endpoints carries `Retry-After` |
 | `GET /api/v1/insar/pairs?lon=&lat=&startDate=&endDate=` | NISAR L-band interferometric (GUNW) pairs over a point, newest first, listed from the public catalog through the ML gateway (default window: the last 180 days, at most 366). Rate-limited like explorations |
 | `GET /api/v1/coverage?lon=&lat=` | The scene plan for a point without running anything |
+| `GET /api/v1/assistant` | `{available, model}`: whether a key is set and today's budget is left, so the chat labels its answers before anyone asks |
+| `POST /api/v1/assistant` | Nova's answer `{message, history[], context}` (`context` is the frontend's summary of the result on screen, read by the model as data, never as instructions). Streams `text/event-stream`: `delta` events with text, then `done` or `error` (`ASSISTANT_DECLINED`, `UPSTREAM_ASSISTANT_ERROR`). Refused before streaming with `503 ASSISTANT_UNAVAILABLE` (no key), `429 RATE_LIMITED` or `429 ASSISTANT_BUDGET_EXHAUSTED`. The system prompt forbids causes, probabilities, hectares, displacement and invented numbers |
 | `GET /api/v1/cases` | The five demo cases measured ahead of time on the ML gateway (`/v2/cases`), one per phenomenon (`DEMO_CASE_IDS`: qadirabad, choco, bug-fire, para-event-02, niscemi-aftermath; frontend issue #28), in its order: id, title, point, status and the baseline and assessment dates. Every other gateway case still opens by id. Kept in memory for 10 minutes and refreshed in the background, so a copy is served at once; after a gateway failure it is not called again for 60 s. With no copy the answer is `502 CASES_UNAVAILABLE`. Known `status` values: `partial`, `complete`, `not_displacement_ready`, `evaluated`. Rate-limited |
 | `GET /api/v1/cases/{id}` | One case: grid, series key, allow-listed evidence (cell counts, threshold policy, optical comparison, sources, pair, common support, radar signatures and their policy, radar comparator, regional context and lens; never area, hectares, probability, depth, displacement or cause), layers (with `title` and `kind`), visualizations, `limitations`, `scientificStatus` and `isDemo`. Unknown id: `404 CASE_NOT_FOUND`. Rate-limited |
 | `GET /api/v1/cases/{id}/layers/{layerId}` | `307` redirect to the layer or visualization image on the ML gateway |
@@ -273,7 +282,8 @@ tests/          unit/ (mirrors src), integration/ (Postgres), live/ (NASA)
 | `CASE_NOT_FOUND` | 404 | Unknown case id |
 | `METHOD_NOT_ALLOWED` | 405 | Wrong method for the path |
 | `PAYLOAD_TOO_LARGE` | 413 | The request body is too large |
-| `RATE_LIMITED` | 429 | More than `RATE_LIMIT_PER_MINUTE` requests from one client |
+| `RATE_LIMITED` | 429 | More than `RATE_LIMIT_PER_MINUTE` requests from one client; `Retry-After` says when to retry |
+| `DAILY_LIMIT_REACHED` | 429 | The client, or the whole app, used today's new analyses (`DAILY_LIMIT_CLIENT`, `DAILY_LIMIT_APP`); `Retry-After` is the time to the 00:00 UTC reset |
 | `UPSTREAM_CATALOG_ERROR` | 502 | The ASF catalog failed; names a precomputed case when one matches |
 | `UPSTREAM_ML_ERROR` | 502 | The ML gateway did not answer |
 | `UPSTREAM_GEOCODER_ERROR` | 502 | Place search provider failed |
@@ -341,7 +351,7 @@ uv run pre-commit install
 
 ## Deployment
 
-Railway builds the `Dockerfile`, runs `alembic upgrade head` before each deploy (`railway.toml`) and health-checks `/api/v1/health/live`. Variables: `DATABASE_URL` (reference of the Postgres service), `CORS_ALLOWED_ORIGINS`, `ENVIRONMENT=production`, `LOG_LEVEL`. **`main` is production**: change it only through reviewed pull requests with green CI.
+Railway builds the `Dockerfile`, runs `alembic upgrade head` before each deploy (`railway.toml`) and health-checks `/api/v1/health/live`. Variables: `DATABASE_URL` (reference of the Postgres service), `CORS_ALLOWED_ORIGINS`, `ENVIRONMENT=production`, `LOG_LEVEL`, `GATEWAY_SHARED_SECRET` (the same value as the gateway's Modal Secret), `DAILY_LIMIT_CLIENT` and `DAILY_LIMIT_APP`. **`main` is production**: change it only through reviewed pull requests with green CI.
 
 ## NASA Space Apps 2026
 

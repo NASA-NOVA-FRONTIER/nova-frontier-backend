@@ -21,6 +21,15 @@ class RateLimiter:
         self._hits: OrderedDict[str, deque[float]] = OrderedDict()
         self._lock = Lock()
 
+    def retry_after(self, key: str) -> float:
+        """Seconds until the oldest hit leaves the window; zero when the client is not limited."""
+        now = self._clock()
+        with self._lock:
+            hits = self._hits.get(key)
+            if not hits or len(hits) < self._max_requests:
+                return 0.0
+            return max(0.0, hits[0] + self._window_seconds - now)
+
     def allow(self, key: str) -> bool:
         now = self._clock()
         with self._lock:
