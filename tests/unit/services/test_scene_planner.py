@@ -6,12 +6,12 @@ import httpx
 import pytest
 
 from nisar_hazard_watch.adapters.asf.asf_catalog import AsfCatalog
-from nisar_hazard_watch.constants.sar import WINDOW_DAYS, PlanStatus
+from nisar_hazard_watch.constants.sar import MIN_IMAGES, WINDOW_DAYS, PlanStatus
 from nisar_hazard_watch.exceptions.catalog_errors import CatalogUnavailableError
 from nisar_hazard_watch.models.geometry import Aoi
 from nisar_hazard_watch.models.scene import Scene
 from nisar_hazard_watch.services.scene_planner import ScenePlanner
-from tests.factories import make_scene, make_series, qadirabad_aoi
+from tests.factories import REVISIT_DAYS, SERIES_START, make_scene, make_series, qadirabad_aoi
 
 FIXTURE = Path(__file__).parents[2] / "fixtures" / "asf_qadirabad.json"
 NOW = datetime(2026, 11, 12, 12, 0, tzinfo=UTC)
@@ -147,3 +147,79 @@ async def test_catalog_failures_propagate_as_their_own_error() -> None:
     # Act / Assert
     with pytest.raises(expected_exception=CatalogUnavailableError):
         await planner.plan(aoi=qadirabad_aoi())
+
+
+RANGE_START = SERIES_START.date()
+RANGE_END = RANGE_START + timedelta(days=REVISIT_DAYS * 11)
+DATE_RANGE = (RANGE_START, RANGE_END)
+
+
+async def test_a_range_reads_its_whole_days_and_spreads_five_passes_across_it() -> None:
+    # Arrange
+    series = make_series(count=12)
+    catalog = FakeCatalog(scenes=series)
+
+    # Act
+    plan = await _planner(catalog=catalog).plan(aoi=qadirabad_aoi(), date_range=DATE_RANGE)
+
+    # Assert
+    _, start, end = catalog.calls[0]
+    assert (start, end) == (
+        datetime(2026, 6, 12, tzinfo=UTC),
+        datetime(2026, 10, 22, 23, 59, 59, tzinfo=UTC),
+    )
+    assert (plan.window_start.date(), plan.window_end.date()) == DATE_RANGE
+    assert plan.status is PlanStatus.READY
+    offsets = [(scene.acquired_at - SERIES_START).days for scene in plan.scenes]
+    # Whole days: targets every 33 d 6 h from 12 Jun 00:00, against passes at 02:00.
+    assert offsets == [0, 36, 72, 96, 132]
+    assert [item.granule_id for item in plan.passes] == [scene.granule_id for scene in series]
+
+
+@pytest.mark.parametrize(
+    ("count", "status", "picked"),
+    [
+        pytest.param(4, PlanStatus.READY, 4, id="four-is-ready"),
+        pytest.param(3, PlanStatus.INSUFFICIENT_HISTORY, 3, id="three-is-not-enough"),
+        pytest.param(0, PlanStatus.NO_COVERAGE, 0, id="none-is-no-coverage"),
+    ],
+)
+async def test_a_range_keeps_todays_thresholds(count: int, status: PlanStatus, picked: int) -> None:
+    # Arrange
+    catalog = FakeCatalog(scenes=make_series(count=count))
+
+    # Act
+    plan = await _planner(catalog=catalog).plan(aoi=qadirabad_aoi(), date_range=DATE_RANGE)
+
+    # Assert
+    assert plan.status is status
+    assert len(plan.scenes) == picked
+
+
+async def test_a_range_tops_up_from_its_own_passes_when_targets_share_them() -> None:
+    # Arrange
+    # Four passes in the first 36 days of a 132-day range: three targets fall on the last one.
+    clustered = make_series(count=4)
+    catalog = FakeCatalog(scenes=clustered)
+
+    # Act
+    plan = await _planner(catalog=catalog).plan(aoi=qadirabad_aoi(), date_range=DATE_RANGE)
+
+    # Assert
+    assert plan.status is PlanStatus.READY
+    assert len(plan.scenes) == MIN_IMAGES
+    assert {scene.granule_id for scene in plan.scenes} <= {s.granule_id for s in clustered}
+
+
+async def test_the_default_window_also_lists_every_pass_of_its_series() -> None:
+    # Arrange
+    series = make_series(count=12)
+    catalog = FakeCatalog(scenes=series)
+
+    # Act
+    plan = await _planner(catalog=catalog).plan(aoi=qadirabad_aoi())
+
+    # Assert
+    assert [item.acquired_at for item in plan.passes] == [s.acquired_at for s in series]
+    assert plan.window_end == NOW
+    assert plan.window_start == NOW - timedelta(days=WINDOW_DAYS)

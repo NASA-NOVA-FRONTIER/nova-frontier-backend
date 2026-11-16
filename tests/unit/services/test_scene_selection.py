@@ -6,8 +6,9 @@ from nisar_hazard_watch.services.scene_selection import (
     choose_group,
     dedupe_scenes,
     select_dates,
+    select_spread,
 )
-from tests.factories import SERIES_START, make_scene, make_series
+from tests.factories import REVISIT_DAYS, SERIES_START, make_scene, make_series
 
 OTHER_GROUP = {"track": 172, "frame": 9}
 MAX_IMAGES = 5
@@ -241,3 +242,43 @@ def test_a_tie_between_series_is_resolved_by_the_smallest_key() -> None:
     # Assert
     assert group is not None
     assert group.code == "2005"
+
+
+def _day(scene_offset_days: int) -> timedelta:
+    return timedelta(days=scene_offset_days)
+
+
+def test_a_range_is_sampled_at_five_evenly_spaced_targets_nearest_pass_first() -> None:
+    # Arrange
+    series = make_series(count=12)
+    end = SERIES_START + _day(REVISIT_DAYS * 11)
+
+    # Act
+    selected = select_spread(scenes=series, start=SERIES_START, end=end, max_images=MAX_IMAGES)
+
+    # Assert
+    # Targets at days 0, 33, 66, 99 and 132; 66 ties between 60 and 72, and the earlier wins.
+    offsets = [(scene.acquired_at - SERIES_START).days for scene in selected]
+    assert offsets == [0, 36, 60, 96, 132]
+
+
+def test_two_targets_on_the_same_pass_keep_it_once() -> None:
+    # Arrange
+    series = make_series(count=3)
+    end = SERIES_START + _day(REVISIT_DAYS * 2)
+
+    # Act
+    selected = select_spread(scenes=series, start=SERIES_START, end=end, max_images=MAX_IMAGES)
+
+    # Assert
+    assert selected == series
+
+
+def test_no_scenes_sample_nothing() -> None:
+    # Arrange / Act
+    selected = select_spread(
+        scenes=[], start=SERIES_START, end=SERIES_START + _day(60), max_images=MAX_IMAGES
+    )
+
+    # Assert
+    assert selected == []
