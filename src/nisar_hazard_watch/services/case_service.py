@@ -3,7 +3,7 @@ import logging
 import time
 from collections.abc import Callable
 
-from nisar_hazard_watch.constants.cases import CASES_UNAVAILABLE_DETAIL
+from nisar_hazard_watch.constants.cases import CASE_SERIES_CACHE_ENTRIES, CASES_UNAVAILABLE_DETAIL
 from nisar_hazard_watch.constants.routes import API_PREFIX, CASES_PREFIX
 from nisar_hazard_watch.exceptions.case_errors import (
     CaseLayerNotFoundError,
@@ -11,7 +11,9 @@ from nisar_hazard_watch.exceptions.case_errors import (
     CasesUnavailableError,
 )
 from nisar_hazard_watch.models.case import CaseSummary, CasesView, CaseView
+from nisar_hazard_watch.models.case_series import CaseSeriesView
 from nisar_hazard_watch.ports.case_catalog import CaseCatalog
+from nisar_hazard_watch.utils.ttl_cache import TtlCache
 
 logger = logging.getLogger(__name__)
 
@@ -43,6 +45,9 @@ class CaseService:
         self._retry_at = 0.0
         self._refresh: asyncio.Task[None] | None = None
         self._lock = asyncio.Lock()
+        self._series: TtlCache[CaseSeriesView] = TtlCache(
+            max_entries=CASE_SERIES_CACHE_ENTRIES, clock=clock
+        )
 
     async def cases(self) -> CasesView:
         cases = [
@@ -66,10 +71,20 @@ class CaseService:
             }
         )
 
+    async def series(self, case_id: str) -> CaseSeriesView:
+        """A known case's series; unknown ids never reach the gateway, and reads are kept."""
+        case = await self._find(case_id=case_id)
+        cached = self._series.get(key=case.id)
+        if cached is not None:
+            return cached
+        series = await self._catalog.series(case_id=case.id)
+        self._series.put(key=case.id, value=series, ttl_seconds=self._ttl_seconds)
+        return series
+
     async def layer_url(self, case_id: str, layer_id: str) -> str:
         case = await self._find(case_id=case_id)
         for image in [*case.layers, *case.visualizations]:
-            if image.id == layer_id:
+            if image.id == layer_id and image.url is not None:
                 return image.url
         raise CaseLayerNotFoundError(f"the case has no layer {layer_id!r}")
 

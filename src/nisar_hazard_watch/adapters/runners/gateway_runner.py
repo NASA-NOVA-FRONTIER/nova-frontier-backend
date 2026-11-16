@@ -259,6 +259,11 @@ class GatewayRunner:
                 "measuredPoint": result.get("point"),
                 "seriesKey": science.get("series_key"),
                 "comparison": self._comparison(science.get("comparison")),
+                # How many dates were read and usable, and which series were tried, so a short
+                # answer can say why it is short.
+                "observedDateCount": science.get("observed_date_count"),
+                "usableWindowDateCount": science.get("usable_window_date_count"),
+                "seriesAttempts": science.get("series_attempts"),
             },
             timings=timings,
             products=products,
@@ -337,6 +342,7 @@ class GatewayRunner:
             "grid",
             "point_db",
             "valid_pixel_count_by_pol",
+            "quality",
         )
         return {key: row[key] for key in keys if key in row}
 

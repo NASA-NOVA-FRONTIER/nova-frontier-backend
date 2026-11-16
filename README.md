@@ -36,7 +36,7 @@ For a point or a drawn area it plans the scenes to read from the public ASF cata
 | `POST` | `/explorations/{id}/analysis` | Start or reuse a regional analysis of the exploration's scene series |
 | `GET` | `/explorations/{id}/layers/{layerId}`, `/explorations/{id}/assets/{name}` | Redirect to a layer image or a published file of the job |
 | `GET` | `/coverage` | Which scenes would be read for a point, without running anything |
-| `GET` | `/cases`, `/cases/{id}`, `/cases/{id}/layers/{layerId}` | The known cases measured ahead of time, one case's evidence, its layer images |
+| `GET` | `/cases`, `/cases/{id}`, `/cases/{id}/series`, `/cases/{id}/layers/{layerId}` | The known cases measured ahead of time, one case's evidence, its measured series, its layer images |
 | `GET` | `/insar/pairs` | NISAR L-band interferometric pairs over a point, newest first |
 | `GET` | `/lenses` | The lenses, what each one shows and how many dates it needs |
 | `GET` | `/places` | Place search for the globe |
@@ -126,8 +126,8 @@ Environment variables (see `.env.example`). The app fails at start-up on a malfo
 |---|---|
 | `GET /api/v1/health` | Dependency report: database (critical), NASA CMR, Modal and Earthdata credentials. `200` when ok or degraded, `503` when a critical dependency is down |
 | `GET /api/v1/health/live` | Liveness only; never touches a dependency (used by the Railway health check) |
-| `POST /api/v1/explorations` | Start an exploration `{lens, geometry, source?, opticalEvidence?, pairId?, coherenceThreshold?}` (`pairId` is required by the `insar` lens and refused by the others; `coherenceThreshold` is 0.1 to 0.9, default 0.35) (`geometry` is a GeoJSON Point, Polygon or MultiPolygon). `202` while it runs, `200` when the answer is final (cache hit, or no data) |
-| `GET /api/v1/explorations/{id}` | Status, stage, per-stage seconds, `etaSeconds` and `etaRemainingSeconds`, progress, `queuePosition`, the scene plan and, when done, the result with its layers, limitations and `scientificStatus` |
+| `POST /api/v1/explorations` | Start an exploration `{lens, geometry, source?, opticalEvidence?, pairId?, coherenceThreshold?, startDate?, endDate?}` (`startDate`/`endDate` choose the window: both or neither, 36 to 365 days, ending no later than today, refused for `insar`; without them, the last 152 days) (`pairId` is required by the `insar` lens and refused by the others; `coherenceThreshold` is 0.1 to 0.9, default 0.35) (`geometry` is a GeoJSON Point, Polygon or MultiPolygon). `202` while it runs, `200` when the answer is final (cache hit, or no data) |
+| `GET /api/v1/explorations/{id}` | Status, stage, per-stage seconds, `etaSeconds` and `etaRemainingSeconds`, progress, `queuePosition`, the scene plan and, when done, the result with its layers, limitations and `scientificStatus`. Each `result.observations[]` carries the date, status, reason, granule, `point_db` (HH/HV dB at the point, null when masked), valid pixels per channel and the product `quality`; `result.lens` is relayed as the gateway sends it (including `temporal_analysis`); `result.quality` adds `observedDateCount`, `usableWindowDateCount` and `seriesAttempts`; each `result.products.visualizations[]` (id, recipe, title, dates, interpretation, components, supported and total cells, bounds) carries a `url` through this API |
 | `POST /api/v1/explorations/{id}/analysis` | Start or reuse a bounded regional analysis of the exploration's catalog series. Poll the returned exploration ID. Regional measurements carry their own sampled dates and grid in `result.products.analysis`. |
 | `DELETE /api/v1/explorations/{id}` | Cancel a running exploration |
 | `GET /api/v1/explorations/{id}/layers/{layerId}` | `307` redirect to the layer image on the ML gateway |
@@ -136,11 +136,12 @@ Environment variables (see `.env.example`). The app fails at start-up on a malfo
 | `GET /api/v1/lenses` | The supported lenses and how many dates they need |
 | `GET /api/v1/limits` | What is left of today's new analyses: `remainingApp`, `remainingClient`, `resetsAt` (UTC) and the limits themselves. A `429` from the exploration endpoints carries `Retry-After` |
 | `GET /api/v1/insar/pairs?lon=&lat=&startDate=&endDate=` | NISAR L-band interferometric (GUNW) pairs over a point, newest first, listed from the public catalog through the ML gateway (default window: the last 180 days, at most 366). Rate-limited like explorations |
-| `GET /api/v1/coverage?lon=&lat=` | The scene plan for a point without running anything |
+| `GET /api/v1/coverage?lon=&lat=[&lens=&opticalEvidence=&startDate=&endDate=]` | The scene plan for a point without running anything: the five chosen `plan.dates`, the window read (`plan.windowStart`, `plan.windowEnd`), every pass of the series in it (`passes[]`), and for `lens` the `etaSeconds`, `cache` state and, from a cached run, the `grid` |
 | `GET /api/v1/assistant` | `{available, model}`: whether a key is set and today's budget is left, so the chat labels its answers before anyone asks |
 | `POST /api/v1/assistant` | Nova's answer `{message, history[], context}` (`context` is the frontend's summary of the result on screen, read by the model as data, never as instructions). Streams `text/event-stream`: `delta` events with text, then `done` or `error` (`ASSISTANT_DECLINED`, `UPSTREAM_ASSISTANT_ERROR`). Refused before streaming with `503 ASSISTANT_UNAVAILABLE` (no key), `429 RATE_LIMITED` or `429 ASSISTANT_BUDGET_EXHAUSTED`. The system prompt forbids causes, probabilities, hectares, displacement and invented numbers |
 | `GET /api/v1/cases` | The five demo cases measured ahead of time on the ML gateway (`/v2/cases`), one per phenomenon (`DEMO_CASE_IDS`: qadirabad, choco, bug-fire, para-event-02, niscemi-aftermath; frontend issue #28), in its order: id, title, point, status and the baseline and assessment dates. Every other gateway case still opens by id. Kept in memory for 10 minutes and refreshed in the background, so a copy is served at once; after a gateway failure it is not called again for 60 s. With no copy the answer is `502 CASES_UNAVAILABLE`. Known `status` values: `partial`, `complete`, `not_displacement_ready`, `evaluated`. Rate-limited |
 | `GET /api/v1/cases/{id}` | One case: grid, series key, allow-listed evidence (cell counts, threshold policy, optical comparison, sources, pair, common support, radar signatures and their policy, radar comparator, regional context and lens; never area, hectares, probability, depth, displacement or cause), layers (with `title` and `kind`), visualizations, `limitations`, `scientificStatus` and `isDemo`. Unknown id: `404 CASE_NOT_FOUND`. Rate-limited |
+| `GET /api/v1/cases/{id}/series` | The case's measured series from the gateway (`/v2/cases/{id}/series`). GCOV cases: `observations` (marker pixel, `gamma0Db` per date and channel, `granule`), `observedGroups` (median and spatial IQR of each cell group per date and channel), `diagnosticBandTimeline` (`outsideCells` of `eligibleCells` per assessment date), `targetDate`. GUNW cases: `intervals` (reference and secondary dates, days, median coherence, supported cells). Both: `pointReadout` and `windowReadout` (the gateway's `area_readout`, renamed because no key naming an area is relayed), scrubbed like the evidence. Kept 10 minutes per case. Unknown id: `404 CASE_NOT_FOUND`; gateway failure: `502 CASES_UNAVAILABLE`. Rate-limited |
 | `GET /api/v1/cases/{id}/layers/{layerId}` | `307` redirect to the layer or visualization image on the ML gateway |
 
 Every response carries `X-Request-ID` (a safe incoming value is kept, otherwise one is generated), including unexpected 500s, which also keep their CORS headers. Errors are `application/problem+json` (server-side details are never echoed, and the headers of an `HTTPException` such as `Allow` or `Retry-After` are preserved):
@@ -243,10 +244,10 @@ tests/          unit/ (mirrors src), integration/ (Postgres), live/ (NASA)
 |---|---|---|---|
 | 1 | Area | A point becomes the 10.24 km square in the local UTM zone (`aoi_from_point`). A drawn polygon (`aoi_from_geojson`) needs a closed ring and at most 100 vertices; it is repaired with `buffer(0)`, split at ±180° and measured on the ellipsoid | One fixed square gives every point the same 1024 × 1024 window at 10 m; repairing and splitting keeps hand-drawn and dateline shapes valid |
 | 2 | Size limit | Capped by native pixels: about 110 km² is the ideal, 400 km² the hard limit (`AREA_TOO_LARGE`) | The analysis reads a window of native pixels, so the cost grows with the area |
-| 3 | Catalog query | One ASF SearchAPI query for the last five months (152 days), with no maturity or configuration filter; maturity is read from the product URL | Seeing every product lets the planner choose; the query fails loudly instead of returning a truncated list |
+| 3 | Catalog query | One ASF SearchAPI query for the last five months (152 days), or for the whole days of the user's range, with no maturity or configuration filter; maturity is read from the product URL | Seeing every product lets the planner choose; the query fails loudly instead of returning a truncated list |
 | 4 | One scene per acquisition | VALIDATED over PROVISIONAL over BETA over urgent response, then CRID and version | The same pass can be published several times; keep the most mature copy |
 | 5 | One series | Group by the ML service's key `track_direction_frame_bandwidthCode_mode`; prefer full coverage (≥ 95 %), dual-pol, most dates, newest | A frame can mix 2005 and 4005 bandwidth codes or DHDH and QPDH modes, whose grids are incompatible |
-| 6 | Dates | Walk back from the newest scene in steps of about 30 days (± 6), up to five images | Evenly spaced dates give the lens a baseline and a target |
+| 6 | Dates | Default window: walk back from the newest scene in steps of about 30 days (± 6), up to five images. A user's range (`startDate`/`endDate`): the scene nearest each of five evenly spaced targets from start to end, kept once if two targets share it (the earlier on a tie); a top-up to four comes from passes inside the range | Evenly spaced dates give the lens a baseline and a target |
 | 7 | Verdict on the plan | Fewer than four usable dates is `insufficientHistory`, no scene at all is `noCoverage`; `maturityMixed` tells the UI when the series mixes maturities | The lenses need at least three earlier dates plus the target; the UI must say when maturities differ |
 
 ## Exploration flow
@@ -278,6 +279,7 @@ tests/          unit/ (mirrors src), integration/ (Postgres), live/ (NASA)
 | `AREA_TOO_LARGE` | 422 | The area is above the 400 km² limit |
 | `SOURCE_NOT_AVAILABLE` | 422 | S-band was asked for; only L-band runs on demand |
 | `INVALID_QUERY` | 422 | The place search text is too short or too long |
+| `INVALID_DATE_RANGE` | 422 | `startDate`/`endDate`: only one sent, end before start, end after today, a span outside 36 to 365 days, or dates with the `insar` lens |
 | `NOT_FOUND` | 404 | Unknown path or exploration |
 | `CASE_NOT_FOUND` | 404 | Unknown case id |
 | `METHOD_NOT_ALLOWED` | 405 | Wrong method for the path |
@@ -386,4 +388,3 @@ GitHub's "Cite this repository" button reads [`CITATION.cff`](CITATION.cff). Cit
 ## License
 
 Apache-2.0.
-

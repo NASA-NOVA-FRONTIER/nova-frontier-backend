@@ -42,6 +42,8 @@ class RadarVisualization(CamelModel):
     crs: str
     png: str
     cog: str | None = None
+    # The image through this API (`/api/v1/explorations/{id}/assets/{png}`), set when relayed.
+    url: str | None = None
 
 
 class RegionalAnalysis(CamelModel):

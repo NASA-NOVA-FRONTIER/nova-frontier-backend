@@ -7,7 +7,10 @@ import pytest
 
 from nisar_hazard_watch.adapters.gateway.gateway_case_catalog import GatewayCaseCatalog
 from nisar_hazard_watch.constants.cases import CASE_FALLBACK_LIMITATIONS
-from nisar_hazard_watch.exceptions.case_errors import CasesUnavailableError
+from nisar_hazard_watch.exceptions.case_errors import (
+    CaseSeriesUnavailableError,
+    CasesUnavailableError,
+)
 from nisar_hazard_watch.models.case import CaseView
 from nisar_hazard_watch.models.science_products import RadarVisualization
 from tests.honesty import forbidden_keys
@@ -227,3 +230,77 @@ async def test_an_unusable_answer_means_the_cases_are_unavailable(
     # Act / Assert
     with pytest.raises(CasesUnavailableError):
         await _cases(handler=handler)
+
+
+# Real series from the production gateway, read 2026-11-16: a GCOV case and a GUNW case.
+GCOV_SERIES = Path(__file__).parents[3] / "fixtures" / "ml_gateway_case_series_gcov.json"
+GUNW_SERIES = Path(__file__).parents[3] / "fixtures" / "ml_gateway_case_series_gunw.json"
+
+
+async def _series(handler: Recorder, case_id: str):
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+        return await GatewayCaseCatalog(client=client, base_url=BASE_URL).series(case_id=case_id)
+
+
+async def test_a_gcov_series_relays_every_date_at_the_point_the_groups_and_the_band() -> None:
+    # Arrange
+    body = json.loads(GCOV_SERIES.read_text(encoding="utf-8"))
+    recorder = Recorder(httpx.Response(status_code=200, json=body))
+
+    # Act
+    series = await _series(recorder, case_id="qadirabad")
+
+    # Assert
+    assert str(recorder.requests[0].url) == f"{BASE_URL}/v2/cases/qadirabad/series"
+    assert len(series.observations) == len(body["observations"])
+    first, sent = series.observations[0], body["observations"][0]
+    assert (first.date.isoformat(), first.polarization) == (sent["date"], sent["polarization"])
+    assert first.gamma0_db == pytest.approx(sent["gamma0_db"])
+    assert first.granule == sent["source"].get("granule", sent["source"]["title"])
+    assert len(series.observed_groups) == len(body["observed_groups"])
+    assert [row.outside_cells for row in series.diagnostic_band_timeline] == [
+        row["outside_cells"] for row in body["diagnostic_band_timeline"]
+    ]
+    assert series.point_readout is not None
+    assert series.window_readout is not None
+    assert series.intervals == []
+    dumped = series.model_dump(by_alias=True, mode="json")
+    assert {"diagnosticBandTimeline", "observedGroups", "pointReadout"} <= set(dumped)
+    assert dumped["observations"][0]["gamma0Db"] == pytest.approx(sent["gamma0_db"])
+    assert forbidden_keys(dumped) == []
+
+
+async def test_a_gunw_series_relays_its_pair_intervals_without_displacement() -> None:
+    # Arrange
+    body = json.loads(GUNW_SERIES.read_text(encoding="utf-8"))
+    recorder = Recorder(httpx.Response(status_code=200, json=body))
+
+    # Act
+    series = await _series(recorder, case_id="kumamoto")
+
+    # Assert
+    assert [
+        (row.reference_date.isoformat(), row.secondary_date.isoformat(), row.interval_days)
+        for row in series.intervals
+    ] == [
+        (row["reference_date"], row["secondary_date"], row["interval_days"])
+        for row in body["intervals"]
+    ]
+    assert series.observations == []
+    assert forbidden_keys(series.model_dump(by_alias=True, mode="json")) == []
+
+
+@pytest.mark.parametrize(
+    argnames="answer",
+    argvalues=[
+        httpx.Response(status_code=404, json={"code": "not_found"}),
+        httpx.Response(status_code=200, json=["not", "a", "series"]),
+        httpx.Response(status_code=200, json={"observations": [{"date": "not a date"}]}),
+        httpx.ConnectError("down"),
+    ],
+    ids=["missing", "not an object", "malformed rows", "unreachable"],
+)
+async def test_a_series_the_gateway_cannot_give_is_unavailable(answer: object) -> None:
+    # Act / Assert
+    with pytest.raises(CaseSeriesUnavailableError):
+        await _series(Recorder(answer), case_id="qadirabad")  # type: ignore[arg-type]

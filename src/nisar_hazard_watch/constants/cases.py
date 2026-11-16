@@ -9,6 +9,9 @@ CASE_ID_PATTERN = r"^[a-z0-9_-]{1,40}$"
 # deforestation, landslide). Every other gateway case still opens by id.
 DEMO_CASE_IDS = frozenset({"qadirabad", "choco", "bug-fire", "para-event-02", "niscemi-aftermath"})
 CASES_UNAVAILABLE_DETAIL = "the known cases are unavailable"
+CASE_SERIES_PATH = "/v2/cases/{case_id}/series"
+CASE_SERIES_UNAVAILABLE_DETAIL = "the series of this case is unavailable"
+CASE_SERIES_CACHE_ENTRIES = 64
 # Never relay a case silently without caveats: used when the gateway sends no limitations.
 CASE_FALLBACK_LIMITATIONS = (
     "Diagnostic evidence measured ahead of time from NISAR L-band radar, not a validated "
