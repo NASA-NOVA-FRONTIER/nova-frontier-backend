@@ -1,4 +1,4 @@
-from datetime import datetime
+from datetime import date, datetime
 
 from pydantic import Field, computed_field
 
@@ -42,6 +42,21 @@ class SceneGroup(CamelModel):
         return f"{self.track:03d}_{self.direction.value}_{self.frame:03d}_{self.code}_{self.mode}"
 
 
+class SeriesOption(CamelModel):
+    """One series found over the area: what a client can pick by `direction` or `seriesKey`."""
+
+    series_key: str
+    direction: Direction
+    track: int
+    frame: int
+    code: str
+    mode: str
+    # Every distinct day this series measured in the window, oldest first.
+    dates: list[date]
+    coverage: float
+    dual_pol: bool
+
+
 class ScenePass(CamelModel):
     acquired_at: datetime
     granule_id: str
@@ -56,5 +71,7 @@ class ScenePlan(CamelModel):
     scenes: list[Scene] = Field(default_factory=list)
     # Every pass of the chosen group in the window, oldest first; `scenes` are the ones picked.
     passes: list[ScenePass] = Field(default_factory=list)
+    # Every series found in the window, ranked as the planner chooses: the first is its default.
+    series: list[SeriesOption] = Field(default_factory=list)
     maturity_mixed: bool = False
     notes: list[str] = Field(default_factory=list)
