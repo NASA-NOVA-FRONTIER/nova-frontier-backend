@@ -7,6 +7,7 @@ import pytest
 
 from nisar_hazard_watch.adapters.runners.gateway_runner import GatewayRunner
 from nisar_hazard_watch.constants.explorations import Lens, RunnerState
+from nisar_hazard_watch.constants.headers import AUTHORIZATION_HEADER
 from nisar_hazard_watch.constants.sar import Configuration, Maturity
 from nisar_hazard_watch.exceptions.exploration_errors import QueueFullError, RunnerUnavailableError
 from nisar_hazard_watch.ports.analysis_runner import InsarSelection, RunnerJob
@@ -16,6 +17,7 @@ FIXTURE = Path(__file__).parents[3] / "fixtures" / "ml_gateway_job.json"
 BASE_URL = "https://gateway.example.test"
 RUN_ID = "669a471d5c234a7b838d41715ff519fc"
 FOREIGN_LAYER_URL = "https://evil.example.test/layer.png"
+SHARED_SECRET = "a-long-shared-secret-value"
 
 
 def _fixture() -> dict:
@@ -597,3 +599,62 @@ async def test_the_exploration_products_keep_the_json_shape_the_frontend_parses(
     assert ticket.result is not None
     assert ticket.result.products is not None
     assert ticket.result.products.model_dump(mode="json") == PINNED_PRODUCTS
+
+
+def _queued(request: httpx.Request) -> httpx.Response:
+    return httpx.Response(
+        status_code=202,
+        json={"job_id": RUN_ID, "status": "queued", "cache": "miss", "result": None},
+    )
+
+
+async def test_job_submissions_carry_the_shared_secret_as_a_bearer_token_and_polls_do_not() -> None:
+    # Arrange
+    sent: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        sent.append(request)
+        return _queued(request=request)
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+        runner = GatewayRunner(client=client, base_url=BASE_URL, shared_secret=SHARED_SECRET)
+
+        # Act
+        await runner.submit(job=_job())
+        await runner.poll(run_id=RUN_ID)
+
+    # Assert
+    assert sent[0].headers[AUTHORIZATION_HEADER] == f"Bearer {SHARED_SECRET}"
+    assert AUTHORIZATION_HEADER not in sent[1].headers
+
+
+async def test_no_authorization_header_is_sent_while_no_secret_is_configured() -> None:
+    # Arrange
+    sent: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        sent.append(request)
+        return _queued(request=request)
+
+    # Act
+    await _run(handler, lambda runner: runner.submit(job=_job()))
+
+    # Assert
+    assert AUTHORIZATION_HEADER not in sent[0].headers
+
+
+async def test_a_refused_credential_is_reported_as_unavailable_without_leaking_the_secret(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    # Arrange
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(status_code=401, json={"code": "unauthorized"})
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+        runner = GatewayRunner(client=client, base_url=BASE_URL, shared_secret=SHARED_SECRET)
+
+        # Act / Assert
+        with caplog.at_level("ERROR"), pytest.raises(RunnerUnavailableError):
+            await runner.submit(job=_job())
+    assert "refused the backend's credentials" in caplog.text
+    assert SHARED_SECRET not in caplog.text

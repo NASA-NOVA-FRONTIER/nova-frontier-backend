@@ -1,4 +1,5 @@
 from nisar_hazard_watch.constants.errors import ReasonCode
+from nisar_hazard_watch.constants.headers import RETRY_AFTER_HEADER
 from nisar_hazard_watch.exceptions.app_error import AppError
 
 
@@ -24,6 +25,15 @@ class RateLimitedError(AppError):
     status_code = 429
     reason_code = ReasonCode.RATE_LIMITED
     title = "Too many requests"
+
+    def __init__(self, detail: str, retry_after_seconds: int | None = None) -> None:
+        headers = {RETRY_AFTER_HEADER: str(retry_after_seconds)} if retry_after_seconds else None
+        super().__init__(detail=detail, headers=headers)
+
+
+class DailyLimitReachedError(RateLimitedError):
+    reason_code = ReasonCode.DAILY_LIMIT_REACHED
+    title = "Daily limit reached"
 
 
 class PayloadTooLargeError(AppError):

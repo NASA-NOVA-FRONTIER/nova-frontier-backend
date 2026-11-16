@@ -8,6 +8,7 @@ INSAR_PREFIX = "/insar"
 PLACES_PREFIX = "/places"
 CASES_PREFIX = "/cases"
 ASSISTANT_PREFIX = "/assistant"
+LIMITS_PREFIX = "/limits"
 CLIENT_IP_HEADER = "X-Forwarded-For"
 UNKNOWN_CLIENT = "unknown"
 

@@ -12,6 +12,7 @@ from nisar_hazard_watch.api.body_limit_middleware import BodyLimitMiddleware
 from nisar_hazard_watch.api.composition import (
     build_assistant_service,
     build_case_service,
+    build_daily_limits,
     build_exploration_service,
     build_health_service,
     build_insar_pairs_service,
@@ -87,12 +88,14 @@ def create_app(
                 app.state.health_service = build_health_service(
                     settings=settings, engine=engine, http_client=http_client
                 )
+                app.state.daily_limits = build_daily_limits(settings=settings, engine=engine)
                 app.state.exploration_service = build_exploration_service(
                     settings=settings,
                     engine=engine,
                     asf_client=asf_client,
                     gateway_client=gateway_client,
                     firms_client=firms_client,
+                    limits=app.state.daily_limits,
                     runner=runner,
                 )
                 app.state.insar_pairs_service = build_insar_pairs_service(
