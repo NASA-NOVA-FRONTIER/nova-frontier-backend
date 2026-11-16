@@ -459,6 +459,149 @@ def test_a_date_range_that_cannot_be_planned_is_a_422_with_its_own_reason(
         assert response.json()["reasonCode"] == ReasonCode.INVALID_DATE_RANGE
 
 
+# The series in the ASF fixture, ranked as the planner chooses (#4): the ascending one first.
+FIXTURE_SERIES = [
+    "084_A_018_4005_DHDH",
+    "063_D_072_4005_DHDH",
+    "135_D_072_4005_DHDH",
+    "135_D_072_2005_DHDH",
+    "135_D_072_2005_QPDH",
+    "063_D_072_2005_DHDH",
+    "063_D_072_2005_QPDH",
+]
+
+
+def test_coverage_lists_every_series_it_found_with_its_direction_and_dates(
+    start_api: Callable[..., TestClient],
+) -> None:
+    # Arrange
+    client = start_api()
+
+    # Act
+    response = client.get(
+        url="/api/v1/coverage", params={"lon": QADIRABAD_LON, "lat": QADIRABAD_LAT}
+    )
+
+    # Assert
+    series = response.json()["series"]
+    assert [item["seriesKey"] for item in series] == FIXTURE_SERIES
+    assert series[0]["seriesKey"] == response.json()["plan"]["seriesKey"]
+    assert {item["direction"] for item in series} == {"A", "D"}
+    assert series[0] | {"dates": None} == {
+        "seriesKey": "084_A_018_4005_DHDH",
+        "direction": "A",
+        "track": 84,
+        "frame": 18,
+        "code": "4005",
+        "mode": "DHDH",
+        "dates": None,
+        "coverage": 1.0,
+        "dualPol": True,
+    }
+    assert series[0]["dates"] == [day for day in SERIES_DAYS if day in series[0]["dates"]]
+
+
+def test_an_exploration_and_its_coverage_follow_the_direction_or_series_asked_for(
+    start_api: Callable[..., TestClient],
+) -> None:
+    # Arrange
+    client = start_api()
+    point = {"lon": QADIRABAD_LON, "lat": QADIRABAD_LAT}
+
+    # Act
+    descending = client.post(url=URL, json={**BODY, "direction": "D"})
+    chosen = client.post(url=URL, json={**BODY, "seriesKey": "135_D_072_2005_QPDH"})
+    coverage = client.get(url="/api/v1/coverage", params={**point, "direction": "D"})
+    by_key = client.get(
+        url="/api/v1/coverage", params={**point, "seriesKey": "135_D_072_2005_QPDH"}
+    )
+
+    # Assert
+    assert descending.status_code in (200, 202)
+    assert descending.json()["plan"]["seriesKey"] == "063_D_072_4005_DHDH"
+    assert chosen.json()["plan"]["seriesKey"] == "135_D_072_2005_QPDH"
+    assert coverage.json()["plan"]["seriesKey"] == "063_D_072_4005_DHDH"
+    assert by_key.json()["plan"]["seriesKey"] == "135_D_072_2005_QPDH"
+    # The list never narrows, so the client can still offer the other direction.
+    assert [item["seriesKey"] for item in coverage.json()["series"]] == FIXTURE_SERIES
+
+
+def test_a_direction_or_series_with_nothing_here_is_the_usual_no_coverage_answer(
+    start_api: Callable[..., TestClient],
+) -> None:
+    # Arrange: only the ascending series is left in the catalog.
+    body = json.loads(FIXTURE.read_text())
+    ascending = [
+        feature
+        for feature in body["features"]
+        if "_084_A_018_" in feature["properties"]["sceneName"]
+    ]
+    client = start_api(asf=_asf_catalog(features=ascending))
+    point = {"lon": QADIRABAD_LON, "lat": QADIRABAD_LAT}
+
+    # Act
+    created = client.post(url=URL, json={**BODY, "direction": "D"})
+    unknown = client.post(url=URL, json={**BODY, "seriesKey": "999_A_001_4005_DHDH"})
+    coverage = client.get(url="/api/v1/coverage", params={**point, "direction": "D"})
+
+    # Assert
+    for response in (created, unknown):
+        assert response.status_code == 200
+        assert response.json()["status"] == "noData"
+        assert response.json()["error"]["reasonCode"] == ReasonCode.NO_COVERAGE
+    assert "descending series" in created.json()["error"]["detail"]
+    assert coverage.json()["plan"]["status"] == "noCoverage"
+    assert coverage.json()["etaSeconds"] is None
+    assert [item["seriesKey"] for item in coverage.json()["series"]] == ["084_A_018_4005_DHDH"]
+
+
+@pytest.mark.parametrize(
+    "extra",
+    [
+        {"direction": "north"},
+        {"seriesKey": "084_A_018"},
+        {"direction": "A", "seriesKey": "063_D_072_4005_DHDH"},
+    ],
+)
+def test_a_series_choice_that_cannot_hold_is_a_422(
+    start_api: Callable[..., TestClient], extra: dict[str, str]
+) -> None:
+    # Arrange
+    client = start_api()
+
+    # Act
+    created = client.post(url=URL, json={**BODY, **extra})
+    coverage = client.get(
+        url="/api/v1/coverage", params={"lon": QADIRABAD_LON, "lat": QADIRABAD_LAT, **extra}
+    )
+
+    # Assert
+    for response in (created, coverage):
+        assert response.status_code == 422
+        assert response.json()["reasonCode"] == ReasonCode.INVALID_REQUEST
+
+
+def test_the_insar_lens_takes_its_direction_from_its_pair(
+    start_api: Callable[..., TestClient],
+) -> None:
+    # Arrange
+    client = start_api()
+    # A real pair (tests/fixtures/ml_gateway_case_series_gunw.json).
+    pair = (
+        "NISAR_L2_PR_GUNW_025_024_A_018_026_4000_SH_20260709T202900_20260709T202935"
+        "_20260721T202900_20260721T202934_P05023_N_F_J_001"
+    )
+
+    # Act
+    response = client.post(
+        url=URL, json={"lens": "insar", "geometry": POINT, "pairId": pair, "direction": "A"}
+    )
+
+    # Assert
+    assert response.status_code == 422
+    assert "insar" in response.json()["detail"]
+
+
 def test_the_openapi_document_lists_the_new_endpoints(
     start_api: Callable[..., TestClient],
 ) -> None:

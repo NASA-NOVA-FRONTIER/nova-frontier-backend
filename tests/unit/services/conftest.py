@@ -9,6 +9,7 @@ from nisar_hazard_watch.adapters.cases.static_precomputed_cases import StaticPre
 from nisar_hazard_watch.adapters.db.job_repository import SqlJobRepository
 from nisar_hazard_watch.adapters.db.models import Base
 from nisar_hazard_watch.constants.fire_context import FireContextStatus
+from nisar_hazard_watch.constants.sar import Direction
 from nisar_hazard_watch.models.fire_context import FireContext
 from nisar_hazard_watch.models.geometry import Aoi
 from nisar_hazard_watch.models.scene import ScenePlan
@@ -49,10 +50,18 @@ class FakePlanner:
         self.plan_result: ScenePlan | Exception = plan or make_plan()
         self.calls = 0
         self.date_ranges: list[DateRange | None] = []
+        self.series_choices: list[tuple[Direction | None, str | None]] = []
 
-    async def plan(self, aoi: Aoi, date_range: DateRange | None = None) -> ScenePlan:
+    async def plan(
+        self,
+        aoi: Aoi,
+        date_range: DateRange | None = None,
+        direction: Direction | None = None,
+        series_key: str | None = None,
+    ) -> ScenePlan:
         self.calls += 1
         self.date_ranges.append(date_range)
+        self.series_choices.append((direction, series_key))
         if isinstance(self.plan_result, Exception):
             raise self.plan_result
         return self.plan_result.model_copy(update={"aoi": aoi})

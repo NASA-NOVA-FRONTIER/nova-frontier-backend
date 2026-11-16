@@ -35,6 +35,8 @@ SCENE_NAME_PATTERN = re.compile(
     r"_(?P<crid>[A-Z]\d{5})_[A-Z]_[A-Z]_[A-Z]_(?P<version>\d{3})$"
 )
 SCENE_TIME_FORMAT = "%Y%m%dT%H%M%S"
+# A series key as SceneGroup.series_key writes it (as constants/insar.py SERIES_KEY reads it).
+SERIES_KEY_PATTERN = r"^\d{3}_(?P<direction>[AD])_\d{3}_\d{4}_[A-Z0-9]{2,4}$"
 FREQUENCY_A_MODE_LENGTH = 2
 
 

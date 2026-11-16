@@ -10,16 +10,19 @@ from nisar_hazard_watch.constants.sar import (
     SPACING_DAYS,
     SPACING_TOLERANCE_DAYS,
     WINDOW_DAYS,
+    Direction,
     PlanStatus,
 )
 from nisar_hazard_watch.models.geometry import Aoi
-from nisar_hazard_watch.models.scene import Scene, ScenePass, ScenePlan
+from nisar_hazard_watch.models.scene import Scene, ScenePass, ScenePlan, SeriesOption
 from nisar_hazard_watch.ports.sar_catalog import SarCatalog
 from nisar_hazard_watch.services.scene_selection import (
     choose_group,
     dedupe_scenes,
+    scene_group,
     select_dates,
     select_spread,
+    series_options,
 )
 from nisar_hazard_watch.utils.date_range import DateRange
 
@@ -49,10 +52,18 @@ class ScenePlanner:
         self._spacing_days = spacing_days
         self._tolerance_days = tolerance_days
 
-    async def plan(self, aoi: Aoi, date_range: DateRange | None = None) -> ScenePlan:
+    async def plan(
+        self,
+        aoi: Aoi,
+        date_range: DateRange | None = None,
+        direction: Direction | None = None,
+        series_key: str | None = None,
+    ) -> ScenePlan:
         """With no range: the last `window_days`, newest pass back in steps of `spacing_days`.
 
         With a range: the pass nearest each of `max_images` evenly spaced targets inside it.
+        A `direction` or `series_key` limits the choice to matching series; the plan still lists
+        every series found, so a client can offer the others.
         """
         if date_range is None:
             end = self._clock()
@@ -61,14 +72,22 @@ class ScenePlanner:
             start = datetime.combine(date_range[0], time.min, tzinfo=UTC)
             end = datetime.combine(date_range[1], END_OF_DAY, tzinfo=UTC)
         scenes = dedupe_scenes(scenes=await self._catalog.search(aoi=aoi, start=start, end=end))
-        group = choose_group(scenes=scenes)
+        series = series_options(scenes=scenes)
+        allowed = [
+            scene
+            for scene in scenes
+            if (direction is None or scene.direction is direction)
+            and (series_key is None or scene_group(scene=scene).series_key == series_key)
+        ]
+        group = choose_group(scenes=allowed)
         if group is None:
             return ScenePlan(
                 status=PlanStatus.NO_COVERAGE,
                 aoi=aoi,
                 window_start=start,
                 window_end=end,
-                notes=["no NISAR L-band GCOV scene covers this area in the planning window"],
+                series=series,
+                notes=[_no_coverage_note(direction=direction, series_key=series_key, found=series)],
             )
         members = [
             scene
@@ -100,6 +119,7 @@ class ScenePlanner:
             window_end=end,
             group=group,
             scenes=selected,
+            series=series,
             passes=[
                 ScenePass(acquired_at=scene.acquired_at, granule_id=scene.granule_id)
                 for scene in members
@@ -125,3 +145,18 @@ class ScenePlanner:
         if coverage < FULL_COVERAGE:
             notes.append(f"the scenes cover about {coverage:.0%} of the area")
         return notes
+
+
+def _no_coverage_note(
+    direction: Direction | None, series_key: str | None, found: list[SeriesOption]
+) -> str:
+    if series_key is not None:
+        wanted = f"series {series_key}"
+    elif direction is not None:
+        wanted = f"{'ascending' if direction is Direction.ASCENDING else 'descending'} series"
+    else:
+        return "no NISAR L-band GCOV scene covers this area in the planning window"
+    others = ", ".join(option.series_key for option in found)
+    return f"no NISAR L-band GCOV {wanted} covers this area in the planning window" + (
+        f"; found: {others}" if others else ""
+    )

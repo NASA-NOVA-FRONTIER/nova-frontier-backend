@@ -8,7 +8,7 @@ from nisar_hazard_watch.constants.sar import (
     MATURITY_RANK,
     Direction,
 )
-from nisar_hazard_watch.models.scene import Scene, SceneGroup
+from nisar_hazard_watch.models.scene import Scene, SceneGroup, SeriesOption
 
 GroupKey = tuple[int, str, int, str, str]
 
@@ -39,16 +39,48 @@ def _rank(scene: Scene) -> tuple:
 
 def choose_group(scenes: list[Scene]) -> SceneGroup | None:
     """Series of one grid: full coverage, then dual-pol, most dates, newest, smallest key."""
+    ranked = _ranked_groups(scenes=scenes)
+    if not ranked:
+        return None
+    return _group(key=ranked[0][0])
+
+
+def series_options(scenes: list[Scene]) -> list[SeriesOption]:
+    """Every series among the scenes, in choose_group's order: the first is the one it picks."""
+    options: list[SeriesOption] = []
+    for key, members in _ranked_groups(scenes=scenes):
+        group = _group(key=key)
+        options.append(
+            SeriesOption(
+                series_key=group.series_key,
+                direction=group.direction,
+                track=group.track,
+                frame=group.frame,
+                code=group.code,
+                mode=group.mode,
+                dates=sorted({scene.acquired_at.date() for scene in members}),
+                coverage=round(mean(scene.coverage for scene in members), 3),
+                dual_pol=any(len(scene.polarizations) >= 2 for scene in members),
+            )
+        )
+    return options
+
+
+def _ranked_groups(scenes: list[Scene]) -> list[tuple[GroupKey, list[Scene]]]:
+    """Best score first; among equal scores, the smallest key first."""
     groups: dict[GroupKey, list[Scene]] = defaultdict(list)
     for scene in scenes:
         groups[_group_key(scene=scene)].append(scene)
-    if not groups:
-        return None
-    scores = {key: _group_score(members=members) for key, members in groups.items()}
-    best_score = max(scores.values())
-    track, direction, frame, code, mode = min(
-        key for key, score in scores.items() if score == best_score
-    )
+    by_key = sorted(groups.items())
+    return sorted(by_key, key=lambda item: _group_score(members=item[1]), reverse=True)
+
+
+def scene_group(scene: Scene) -> SceneGroup:
+    return _group(key=_group_key(scene=scene))
+
+
+def _group(key: GroupKey) -> SceneGroup:
+    track, direction, frame, code, mode = key
     return SceneGroup(
         track=track, direction=Direction(direction), frame=frame, code=code, mode=mode
     )

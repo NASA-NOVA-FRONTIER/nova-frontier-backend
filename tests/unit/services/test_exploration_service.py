@@ -16,7 +16,7 @@ from nisar_hazard_watch.constants.explorations import (
     StageName,
 )
 from nisar_hazard_watch.constants.fire_context import WILDFIRE_LIMITATION, FireContextStatus
-from nisar_hazard_watch.constants.sar import PlanStatus
+from nisar_hazard_watch.constants.sar import Direction, PlanStatus
 from nisar_hazard_watch.exceptions.catalog_errors import CatalogUnavailableError
 from nisar_hazard_watch.exceptions.date_range_errors import InvalidDateRangeError
 from nisar_hazard_watch.exceptions.exploration_errors import (
@@ -28,10 +28,11 @@ from nisar_hazard_watch.exceptions.exploration_errors import (
 )
 from nisar_hazard_watch.exceptions.geometry_errors import InvalidGeometryError
 from nisar_hazard_watch.exceptions.pair_errors import InvalidPairError
+from nisar_hazard_watch.exceptions.series_choice_errors import InvalidSeriesChoiceError
 from nisar_hazard_watch.models.exploration import ExplorationRequest, ExplorationView
 from nisar_hazard_watch.models.fire_context import FireContext
 from nisar_hazard_watch.models.insar_summary import InsarSummary
-from nisar_hazard_watch.models.scene import ScenePass
+from nisar_hazard_watch.models.scene import ScenePass, SeriesOption
 from nisar_hazard_watch.models.science_products import (
     PublishedAsset,
     RadarVisualization,
@@ -1315,3 +1316,84 @@ async def test_coverage_with_a_range_lists_its_window_and_every_pass_of_the_seri
     assert (coverage.plan.window_start, coverage.plan.window_end) == (RANGE_START, RANGE_END)
     assert [item.granule_id for item in coverage.passes] == [p.granule_id for p in passes]
     assert len(coverage.plan.dates) == 5
+
+
+async def test_an_exploration_hands_the_direction_or_series_it_was_asked_for_to_the_planner(
+    make_service: Factory, planner: FakePlanner
+) -> None:
+    # Arrange: room for three runs at once.
+    service = make_service(max_active=3)
+
+    # Act
+    await service.create(request=_request())
+    await service.create(request=_request(direction=Direction.DESCENDING))
+    await service.create(request=_request(series_key="084_A_018_4005_DHDH"))
+
+    # Assert
+    assert planner.series_choices == [
+        (None, None),
+        (Direction.DESCENDING, None),
+        (None, "084_A_018_4005_DHDH"),
+    ]
+
+
+async def test_an_exploration_in_a_direction_with_no_series_ends_with_no_coverage(
+    make_service: Factory, planner: FakePlanner, runner: ScriptedRunner
+) -> None:
+    # Arrange
+    service = make_service()
+    note = "no NISAR L-band GCOV descending series covers this area in the planning window"
+    planner.plan_result = make_plan(
+        status=PlanStatus.NO_COVERAGE, group=None, scenes=[], notes=[note]
+    )
+
+    # Act
+    view, final = await service.create(request=_request(direction=Direction.DESCENDING))
+
+    # Assert
+    assert final is True
+    assert view.status is ExplorationStatus.NO_DATA
+    assert view.error is not None
+    assert view.error.reason_code is ReasonCode.NO_COVERAGE
+    assert view.error.detail == note
+    assert runner.submissions == []
+
+
+async def test_coverage_lists_the_series_and_plans_the_one_asked_for(
+    make_service: Factory, planner: FakePlanner
+) -> None:
+    # Arrange
+    service = make_service()
+    option = SeriesOption(
+        series_key="063_D_072_4005_DHDH",
+        direction=Direction.DESCENDING,
+        track=63,
+        frame=72,
+        code="4005",
+        mode="DHDH",
+        dates=[date(2026, 6, 30), date(2026, 10, 28)],
+        coverage=1.0,
+        dual_pol=True,
+    )
+    planner.plan_result = make_plan(series=[option])
+
+    # Act
+    coverage = await service.coverage(geometry=POINT, direction=Direction.DESCENDING)
+
+    # Assert
+    assert planner.series_choices == [(Direction.DESCENDING, None)]
+    assert coverage.series == [option]
+
+
+async def test_coverage_refuses_a_series_from_the_other_direction_before_planning(
+    make_service: Factory, planner: FakePlanner
+) -> None:
+    # Arrange
+    service = make_service()
+
+    # Act / Assert
+    with pytest.raises(expected_exception=InvalidSeriesChoiceError):
+        await service.coverage(
+            geometry=POINT, direction=Direction.ASCENDING, series_key="063_D_072_4005_DHDH"
+        )
+    assert planner.calls == 0

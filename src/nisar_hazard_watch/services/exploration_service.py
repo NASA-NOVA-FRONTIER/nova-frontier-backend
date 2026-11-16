@@ -49,7 +49,7 @@ from nisar_hazard_watch.constants.insar import (
     INSAR_WINDOW_LIMITATION,
 )
 from nisar_hazard_watch.constants.routes import API_PREFIX, EXPLORATIONS_PREFIX
-from nisar_hazard_watch.constants.sar import PlanStatus
+from nisar_hazard_watch.constants.sar import Direction, PlanStatus
 from nisar_hazard_watch.exceptions.catalog_errors import CatalogUnavailableError
 from nisar_hazard_watch.exceptions.date_range_errors import InvalidDateRangeError
 from nisar_hazard_watch.exceptions.exploration_errors import (
@@ -59,6 +59,7 @@ from nisar_hazard_watch.exceptions.exploration_errors import (
     SourceNotAvailableError,
 )
 from nisar_hazard_watch.exceptions.geometry_errors import InvalidGeometryError
+from nisar_hazard_watch.exceptions.series_choice_errors import InvalidSeriesChoiceError
 from nisar_hazard_watch.models.exploration import (
     CoverageGrid,
     CoverageView,
@@ -96,6 +97,7 @@ from nisar_hazard_watch.utils.geometry import (
     window_pixels,
 )
 from nisar_hazard_watch.utils.gunw import pair_dates
+from nisar_hazard_watch.utils.series_choice import series_choice_problem
 
 logger = logging.getLogger(__name__)
 
@@ -338,12 +340,19 @@ class ExplorationService:
         optical_evidence: bool | None = None,
         start_date: date | None = None,
         end_date: date | None = None,
+        direction: Direction | None = None,
+        series_key: str | None = None,
     ) -> CoverageView:
         if optical_evidence is None:
             optical_evidence = lens in DEFAULT_OPTICAL_LENSES
+        problem = series_choice_problem(direction=direction, series_key=series_key)
+        if problem is not None:
+            raise InvalidSeriesChoiceError(problem)
         date_range = self._date_range(start=start_date, end=end_date)
         aoi = self._aoi(geometry=geometry)
-        plan = await self._planner.plan(aoi=aoi, date_range=date_range)
+        plan = await self._planner.plan(
+            aoi=aoi, date_range=date_range, direction=direction, series_key=series_key
+        )
         longitude, latitude = aoi_center(aoi=aoi)
         case = next(
             (
@@ -360,6 +369,7 @@ class ExplorationService:
             precomputed_case=case,
             lens=lens,
             passes=plan.passes,
+            series=plan.series,
         )
         # Same rule as create(): with no coverage or no scenes nothing would run.
         if lens is Lens.INSAR or plan.status is PlanStatus.NO_COVERAGE or not plan.scenes:
@@ -370,6 +380,8 @@ class ExplorationService:
             optical_evidence=optical_evidence,
             start_date=start_date,
             end_date=end_date,
+            direction=direction,
+            series_key=series_key,
         )
         now = self._clock()
         fresh = await self._repository.find_fresh(
@@ -444,7 +456,12 @@ class ExplorationService:
         self, aoi: Aoi, request: ExplorationRequest, date_range: DateRange | None
     ) -> ScenePlan:
         try:
-            return await self._planner.plan(aoi=aoi, date_range=date_range)
+            return await self._planner.plan(
+                aoi=aoi,
+                date_range=date_range,
+                direction=request.direction,
+                series_key=request.series_key,
+            )
         except CatalogUnavailableError as exc:
             longitude, latitude = aoi_center(aoi=aoi)
             case = self._cases.find(longitude=longitude, latitude=latitude, lens=request.lens)
