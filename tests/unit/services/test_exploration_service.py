@@ -1237,6 +1237,7 @@ async def test_relayed_visualizations_point_at_their_image_through_this_api(
     assert relayed.url == f"/api/v1/explorations/{view.id}/assets/{image.name}"
     assert await service.asset_url(exploration_id=view.id, name=image.name) == image.url
 
+
 RANGE_START = date(2026, 6, 1)
 RANGE_END = date(2026, 10, 31)
 
