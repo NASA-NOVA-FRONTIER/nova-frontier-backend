@@ -60,7 +60,7 @@ def start_api(
         client.__exit__(None, None, None)
 
 
-def test_the_cases_come_back_as_camel_case_summaries_in_the_gateway_order(
+def test_the_list_holds_only_the_demo_cases_as_camel_case_summaries_in_the_gateway_order(
     start_api: Callable[..., TestClient],
 ) -> None:
     # Arrange
@@ -72,15 +72,20 @@ def test_the_cases_come_back_as_camel_case_summaries_in_the_gateway_order(
     # Assert
     cases = response.json()["cases"]
     assert response.status_code == 200
-    assert [case["id"] for case in cases] == [
-        "chokwe",
-        "qadirabad",
-        "richmond",
-        "kumamoto",
-        "choco",
-        "san-marcos",
-    ]
-    assert cases[1] == QADIRABAD_SUMMARY
+    assert [case["id"] for case in cases] == ["qadirabad", "choco"]
+    assert cases[0] == QADIRABAD_SUMMARY
+
+
+def test_a_case_left_off_the_list_still_opens_by_id(start_api: Callable[..., TestClient]) -> None:
+    # Arrange
+    client = start_api(gateway=_gateway())
+
+    # Act
+    response = client.get(url=f"{URL}/kumamoto")
+
+    # Assert
+    assert response.status_code == 200
+    assert response.json()["id"] == "kumamoto"
 
 
 def test_a_case_carries_its_grid_evidence_layers_and_limitations(

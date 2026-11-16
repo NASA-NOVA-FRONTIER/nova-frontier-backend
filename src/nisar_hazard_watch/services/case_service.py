@@ -30,8 +30,11 @@ class CaseService:
         ttl_seconds: float,
         retry_after_seconds: float,
         clock: Callable[[], float] = time.monotonic,
+        listed: frozenset[str] | None = None,
     ) -> None:
         self._catalog = catalog
+        # None lists every case; a set narrows only the list, so any case still opens by id.
+        self._listed = listed
         self._ttl_seconds = ttl_seconds
         self._retry_after_seconds = retry_after_seconds
         self._clock = clock
@@ -42,7 +45,9 @@ class CaseService:
         self._lock = asyncio.Lock()
 
     async def cases(self) -> CasesView:
-        cases = await self._known()
+        cases = [
+            case for case in await self._known() if self._listed is None or case.id in self._listed
+        ]
         return CasesView(cases=[CaseSummary.model_validate(case.model_dump()) for case in cases])
 
     async def get(self, case_id: str) -> CaseView:

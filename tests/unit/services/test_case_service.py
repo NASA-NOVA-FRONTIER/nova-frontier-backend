@@ -276,3 +276,22 @@ async def test_an_unknown_case_or_layer_is_not_found(catalog: FakeCatalog) -> No
         await service.get(case_id="nope")
     with pytest.raises(CaseLayerNotFoundError):
         await service.layer_url(case_id="qadirabad", layer_id="nope")
+
+
+async def test_a_listed_set_narrows_the_list_but_not_the_lookup(catalog: FakeCatalog) -> None:
+    # Arrange
+    service = CaseService(
+        catalog=catalog,
+        ttl_seconds=TTL_SECONDS,
+        retry_after_seconds=RETRY_AFTER_SECONDS,
+        clock=FakeClock(),
+        listed=frozenset({"choco", "qadirabad"}),
+    )
+
+    # Act
+    view = await service.cases()
+    hidden = await service.get(case_id="kumamoto")
+
+    # Assert
+    assert [case.id for case in view.cases] == ["qadirabad", "choco"]
+    assert hidden.id == "kumamoto"
