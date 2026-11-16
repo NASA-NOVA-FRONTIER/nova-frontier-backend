@@ -5,6 +5,9 @@ CASES_CACHE_TTL_SECONDS = 600.0
 # After a failed read, the gateway is left alone this long (a cold /v2/cases can take 12 s).
 CASES_RETRY_AFTER_SECONDS = 60.0
 CASE_ID_PATTERN = r"^[a-z0-9_-]{1,40}$"
+# Frontend issue #28: the list relays one demo case per phenomenon (flood, earthquake, wildfire,
+# deforestation, landslide). Every other gateway case still opens by id.
+DEMO_CASE_IDS = frozenset({"qadirabad", "choco", "bug-fire", "para-event-02", "niscemi-aftermath"})
 CASES_UNAVAILABLE_DETAIL = "the known cases are unavailable"
 CASE_SERIES_PATH = "/v2/cases/{case_id}/series"
 CASE_SERIES_UNAVAILABLE_DETAIL = "the series of this case is unavailable"
