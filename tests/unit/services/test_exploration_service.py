@@ -32,6 +32,7 @@ from nisar_hazard_watch.models.fire_context import FireContext
 from nisar_hazard_watch.models.insar_summary import InsarSummary
 from nisar_hazard_watch.models.science_products import (
     PublishedAsset,
+    RadarVisualization,
     RegionalAnalysis,
     ScienceProducts,
 )
@@ -1192,3 +1193,44 @@ async def test_a_regional_analysis_also_spends_the_allowance_of_its_client(
     with pytest.raises(DailyLimitReachedError):
         await service.create_analysis(exploration_id=parent.id, client=CLIENT)
     assert len(runner.submissions) == 1
+
+
+async def test_relayed_visualizations_point_at_their_image_through_this_api(
+    make_service: Factory, runner: ScriptedRunner
+) -> None:
+    # Arrange
+    service = make_service()
+    view, _ = await service.create(request=_request())
+    image = PublishedAsset(
+        name="view_temporal_mad_hh.png",
+        url="https://runner.invalid/view_temporal_mad_hh.png",
+        media_type="image/png",
+        bytes=40,
+        sha256="b" * 64,
+    )
+    visualization = RadarVisualization(
+        id="view_temporal_mad_hh",
+        recipe="temporal_mad",
+        title="Temporal variability · HH",
+        dates=["2026-07-01", "2026-09-23"],
+        interpretation="Scaled median absolute deviation across the listed observations.",
+        components=[],
+        colormap="magma",
+        supported_cells=262142,
+        total_cells=262144,
+        grid={},
+        bounds=(-120.29, 44.95, -120.23, 44.99),
+        crs="EPSG:4326",
+        png=image.name,
+    )
+    _succeeded(runner, products=ScienceProducts(assets=[image], visualizations=[visualization]))
+
+    # Act
+    finished = await service.get(exploration_id=view.id)
+
+    # Assert
+    assert finished.result is not None
+    assert finished.result.products is not None
+    relayed = finished.result.products.visualizations[0]
+    assert relayed.url == f"/api/v1/explorations/{view.id}/assets/{image.name}"
+    assert await service.asset_url(exploration_id=view.id, name=image.name) == image.url

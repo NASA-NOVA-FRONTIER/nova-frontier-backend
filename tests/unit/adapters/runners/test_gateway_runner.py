@@ -501,6 +501,8 @@ PINNED_PRODUCTS = {
             "crs": "EPSG:4326",
             "png": "view_polarization_rgb_hh_hv.png",
             "cog": "view_polarization_rgb_hh_hv.tif",
+            # Set by the exploration service to the image's path through this API (#1).
+            "url": None,
         }
     ],
     "assets": [
@@ -658,3 +660,73 @@ async def test_a_refused_credential_is_reported_as_unavailable_without_leaking_t
             await runner.submit(job=_job())
     assert "refused the backend's credentials" in caplog.text
     assert SHARED_SECRET not in caplog.text
+
+
+# A real explore result: the Rowe Creek replay job on the production gateway, read 2026-11-16.
+EXPLORE_FIXTURE = Path(__file__).parents[3] / "fixtures" / "ml_gateway_explore_job.json"
+EXPLORE_RUN_ID = "31f53174c9b755b69caab2aa927c5b14"
+CHANNELS = {"HH", "HV"}
+
+
+async def test_a_real_explore_result_keeps_the_point_values_and_series_of_every_date() -> None:
+    # Arrange
+    payload = json.loads(EXPLORE_FIXTURE.read_text(encoding="utf-8"))
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(status_code=200, json=payload)
+
+    # Act
+    ticket = await _run(handler, lambda runner: runner.poll(run_id=EXPLORE_RUN_ID))
+
+    # Assert
+    result = ticket.result
+    assert result is not None
+    science = payload["result"]["science"]
+    assert [row["date"] for row in result.observations] == [
+        row["date"] for row in science["observations"]
+    ]
+    for relayed, sent in zip(result.observations, science["observations"], strict=True):
+        assert set(relayed["point_db"]) == CHANNELS
+        assert relayed["point_db"] == sent["point_db"]
+        assert relayed["status"] == sent["status"]
+        assert relayed["granule_id"] == sent["granule_id"]
+        assert relayed["quality"]["productVersion"] == sent["quality"]["productVersion"]
+    assert result.lens is not None
+    assert result.lens["temporal_analysis"] == science["lens"]["temporal_analysis"]
+    assert result.quality["observedDateCount"] == science["observed_date_count"]
+    assert result.quality["usableWindowDateCount"] == science["usable_window_date_count"]
+    assert result.quality["seriesAttempts"] == science["series_attempts"]
+
+
+async def test_a_real_explore_result_relays_every_published_visualization() -> None:
+    # Arrange
+    payload = json.loads(EXPLORE_FIXTURE.read_text(encoding="utf-8"))
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(status_code=200, json=payload)
+
+    # Act
+    ticket = await _run(handler, lambda runner: runner.poll(run_id=EXPLORE_RUN_ID))
+
+    # Assert
+    products = ticket.result.products if ticket.result else None
+    assert products is not None
+    sent = payload["result"]["visualizations"]
+    assert [view.id for view in products.visualizations] == [view["id"] for view in sent]
+    names = {asset.name for asset in products.assets}
+    for view, original in zip(products.visualizations, sent, strict=True):
+        assert (view.recipe, view.title, view.dates) == (
+            original["recipe"],
+            original["title"],
+            original["dates"],
+        )
+        assert view.interpretation == original["interpretation"]
+        assert len(view.components) == len(original["components"])
+        assert (view.supported_cells, view.total_cells) == (
+            original["supported_cells"],
+            original["total_cells"],
+        )
+        assert list(view.bounds) == original["bounds"]
+        assert view.png in names
+    dumped = products.model_dump(by_alias=True)["visualizations"][0]
+    assert {"supportedCells", "totalCells", "interpretation"} <= set(dumped)

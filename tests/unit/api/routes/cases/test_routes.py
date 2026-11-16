@@ -221,3 +221,50 @@ def test_the_openapi_document_names_the_known_case_statuses(
     description = schemas["CaseSummary"]["properties"]["status"]["description"]
     for status in ("partial", "complete", "not_displacement_ready", "evaluated"):
         assert status in description
+
+
+SERIES = Path(__file__).parents[4] / "fixtures" / "ml_gateway_case_series_gcov.json"
+
+
+def _gateway_with_series() -> httpx.MockTransport:
+    cases = json.loads(CASES.read_text())
+    series = json.loads(SERIES.read_text(encoding="utf-8"))
+
+    def answer(request: httpx.Request) -> httpx.Response:
+        if request.url.path.endswith("/series"):
+            return httpx.Response(status_code=200, json=series)
+        return httpx.Response(status_code=200, json=cases)
+
+    return httpx.MockTransport(answer)
+
+
+def test_a_case_series_comes_back_in_camel_case_with_its_band_timeline(
+    start_api: Callable[..., TestClient],
+) -> None:
+    # Arrange
+    client = start_api(gateway=_gateway_with_series())
+
+    # Act
+    response = client.get(url=f"{URL}/qadirabad/series")
+
+    # Assert
+    body = response.json()
+    assert response.status_code == 200
+    assert body["caseId"] == "qadirabad"
+    assert {"HH", "HV"} <= {row["polarization"] for row in body["observations"]}
+    assert all("gamma0Db" in row for row in body["observations"])
+    assert body["diagnosticBandTimeline"][0]["outsideCells"] >= 0
+    assert body["scientificStatus"]
+
+
+def test_the_series_of_an_unknown_case_is_not_found(start_api: Callable[..., TestClient]) -> None:
+    # Arrange
+    client = start_api(gateway=_gateway_with_series())
+
+    # Act
+    response = client.get(url=f"{URL}/atlantis/series")
+
+    # Assert
+    assert response.status_code == 404
+    assert response.headers["content-type"] == PROBLEM_CONTENT_TYPE
+    assert response.json()["reasonCode"] == ReasonCode.CASE_NOT_FOUND

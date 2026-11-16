@@ -18,3 +18,9 @@ class CasesUnavailableError(AppError):
     status_code = 502
     reason_code = ReasonCode.CASES_UNAVAILABLE
     title = "Known cases unavailable"
+
+
+class CaseSeriesUnavailableError(AppError):
+    status_code = 502
+    reason_code = ReasonCode.CASES_UNAVAILABLE
+    title = "Case series unavailable"

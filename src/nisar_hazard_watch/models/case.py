@@ -31,9 +31,7 @@ class CaseLayer(CamelModel):
 
 
 class CaseVisualization(RadarVisualization):
-    """The exploration visualization DTO (#20) plus our redirect URL; png and cog name the files."""
-
-    url: str
+    """The exploration visualization DTO (#20); the catalog always sets its redirect `url`."""
 
 
 class CaseSource(CamelModel):

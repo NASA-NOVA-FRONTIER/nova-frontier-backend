@@ -606,6 +606,10 @@ class ExplorationService:
                         asset.model_copy(update={"url": f"{root}/{asset.name}"})
                         for asset in products.assets
                     ],
+                    "visualizations": [
+                        view.model_copy(update={"url": f"{root}/{view.png}"})
+                        for view in products.visualizations
+                    ],
                 }
             )
         layers = [
