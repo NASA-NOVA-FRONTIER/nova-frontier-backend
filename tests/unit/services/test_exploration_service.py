@@ -1,5 +1,5 @@
 from collections.abc import Callable
-from datetime import timedelta
+from datetime import UTC, date, datetime, timedelta
 
 import pytest
 
@@ -18,6 +18,7 @@ from nisar_hazard_watch.constants.explorations import (
 from nisar_hazard_watch.constants.fire_context import WILDFIRE_LIMITATION, FireContextStatus
 from nisar_hazard_watch.constants.sar import PlanStatus
 from nisar_hazard_watch.exceptions.catalog_errors import CatalogUnavailableError
+from nisar_hazard_watch.exceptions.date_range_errors import InvalidDateRangeError
 from nisar_hazard_watch.exceptions.exploration_errors import (
     DailyLimitReachedError,
     ExplorationNotFoundError,
@@ -30,6 +31,7 @@ from nisar_hazard_watch.exceptions.pair_errors import InvalidPairError
 from nisar_hazard_watch.models.exploration import ExplorationRequest, ExplorationView
 from nisar_hazard_watch.models.fire_context import FireContext
 from nisar_hazard_watch.models.insar_summary import InsarSummary
+from nisar_hazard_watch.models.scene import ScenePass
 from nisar_hazard_watch.models.science_products import (
     PublishedAsset,
     RadarVisualization,
@@ -41,7 +43,7 @@ from nisar_hazard_watch.ports.precomputed_cases import PrecomputedCase
 from nisar_hazard_watch.services.daily_limits import DailyLimits
 from nisar_hazard_watch.services.exploration_service import ExplorationService
 from nisar_hazard_watch.utils.client_hash import hash_client_key
-from tests.factories import QADIRABAD_LAT, QADIRABAD_LON, make_job, make_plan
+from tests.factories import QADIRABAD_LAT, QADIRABAD_LON, make_job, make_plan, make_series
 from tests.unit.services.conftest import (
     DEADLINE_SECONDS,
     PRIOR_SECONDS,
@@ -1234,3 +1236,81 @@ async def test_relayed_visualizations_point_at_their_image_through_this_api(
     relayed = finished.result.products.visualizations[0]
     assert relayed.url == f"/api/v1/explorations/{view.id}/assets/{image.name}"
     assert await service.asset_url(exploration_id=view.id, name=image.name) == image.url
+
+RANGE_START = date(2026, 6, 1)
+RANGE_END = date(2026, 10, 31)
+
+
+async def test_an_exploration_with_a_range_plans_inside_it_and_caches_it_apart(
+    make_service: Factory, planner: FakePlanner, runner: ScriptedRunner
+) -> None:
+    # Arrange
+    service = make_service()
+    ranged = _request(start_date=RANGE_START, end_date=RANGE_END)
+    default, _ = await service.create(request=_request())
+    _succeeded(runner)
+    await service.get(exploration_id=default.id)
+
+    # Act
+    first, _ = await service.create(request=ranged)
+    _succeeded(runner)
+    await service.get(exploration_id=first.id)
+    again, final = await service.create(request=ranged)
+
+    # Assert
+    assert planner.date_ranges == [None, (RANGE_START, RANGE_END), (RANGE_START, RANGE_END)]
+    assert first.id != default.id
+    assert (again.id, again.cache, final) == (first.id, CacheState.HIT, True)
+
+
+@pytest.mark.parametrize(
+    "overrides",
+    [
+        pytest.param({"start_date": RANGE_START}, id="start-only"),
+        pytest.param({"start_date": RANGE_END, "end_date": RANGE_START}, id="reversed"),
+        pytest.param(
+            {
+                "lens": Lens.INSAR,
+                "pair_id": KUMAMOTO_PAIR,
+                "start_date": RANGE_START,
+                "end_date": RANGE_END,
+            },
+            id="insar",
+        ),
+    ],
+)
+async def test_an_exploration_with_a_range_it_cannot_plan_is_refused_before_planning(
+    make_service: Factory, planner: FakePlanner, overrides: dict[str, object]
+) -> None:
+    # Arrange
+    service = make_service()
+
+    # Act / Assert
+    with pytest.raises(expected_exception=InvalidDateRangeError):
+        await service.create(request=_request(**overrides))
+    assert planner.calls == 0
+
+
+async def test_coverage_with_a_range_lists_its_window_and_every_pass_of_the_series(
+    make_service: Factory, planner: FakePlanner
+) -> None:
+    # Arrange
+    service = make_service()
+    passes = [
+        ScenePass(acquired_at=scene.acquired_at, granule_id=scene.granule_id)
+        for scene in make_series(count=8)
+    ]
+    planner.plan_result = make_plan(
+        window_start=datetime(2026, 6, 1, tzinfo=UTC),
+        window_end=datetime(2026, 10, 31, 23, 59, 59, tzinfo=UTC),
+        passes=passes,
+    )
+
+    # Act
+    coverage = await service.coverage(geometry=POINT, start_date=RANGE_START, end_date=RANGE_END)
+
+    # Assert
+    assert planner.date_ranges == [(RANGE_START, RANGE_END)]
+    assert (coverage.plan.window_start, coverage.plan.window_end) == (RANGE_START, RANGE_END)
+    assert [item.granule_id for item in coverage.passes] == [p.granule_id for p in passes]
+    assert len(coverage.plan.dates) == 5

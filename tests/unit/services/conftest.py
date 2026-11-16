@@ -23,6 +23,7 @@ from nisar_hazard_watch.ports.precomputed_cases import PrecomputedCases
 from nisar_hazard_watch.services.daily_limits import DailyLimits
 from nisar_hazard_watch.services.eta_estimator import EtaEstimator
 from nisar_hazard_watch.services.exploration_service import ExplorationService
+from nisar_hazard_watch.utils.date_range import DateRange
 from tests.factories import make_plan
 
 START = datetime(2026, 11, 12, 12, 0, tzinfo=UTC)
@@ -47,9 +48,11 @@ class FakePlanner:
     def __init__(self, plan: ScenePlan | Exception | None = None) -> None:
         self.plan_result: ScenePlan | Exception = plan or make_plan()
         self.calls = 0
+        self.date_ranges: list[DateRange | None] = []
 
-    async def plan(self, aoi: Aoi) -> ScenePlan:
+    async def plan(self, aoi: Aoi, date_range: DateRange | None = None) -> ScenePlan:
         self.calls += 1
+        self.date_ranges.append(date_range)
         if isinstance(self.plan_result, Exception):
             raise self.plan_result
         return self.plan_result.model_copy(update={"aoi": aoi})

@@ -1,6 +1,8 @@
+from datetime import date
 from typing import Annotated
 
 from fastapi import APIRouter, Query
+from fastapi.openapi.models import Example
 
 from nisar_hazard_watch.api.dependencies import ExplorationServiceDep, RateLimit
 from nisar_hazard_watch.constants.explorations import DEFAULT_COVERAGE_LENS, Lens
@@ -14,6 +16,21 @@ Latitude = Annotated[float, Query(ge=-90, le=90, allow_inf_nan=False)]
 # Without opticalEvidence, the service assumes what the frontend sends for that lens.
 LensQuery = Annotated[Lens, Query()]
 OpticalEvidence = Annotated[bool | None, Query(alias="opticalEvidence")]
+# Both or neither, 36 to 365 days apart and ending no later than today; none = the default window.
+StartDate = Annotated[
+    date | None,
+    Query(
+        alias="startDate",
+        openapi_examples={"range": Example(summary="A user's range", value="2026-06-01")},
+    ),
+]
+EndDate = Annotated[
+    date | None,
+    Query(
+        alias="endDate",
+        openapi_examples={"range": Example(summary="A user's range", value="2026-10-31")},
+    ),
+]
 
 
 @router.get("", response_model=CoverageView, dependencies=[RateLimit])
@@ -23,9 +40,13 @@ async def get_coverage(
     service: ExplorationServiceDep,
     lens: LensQuery = DEFAULT_COVERAGE_LENS,
     optical_evidence: OpticalEvidence = None,
+    start_date: StartDate = None,
+    end_date: EndDate = None,
 ) -> CoverageView:
     return await service.coverage(
         geometry={"type": "Point", "coordinates": [lon, lat]},
         lens=lens,
         optical_evidence=optical_evidence,
+        start_date=start_date,
+        end_date=end_date,
     )

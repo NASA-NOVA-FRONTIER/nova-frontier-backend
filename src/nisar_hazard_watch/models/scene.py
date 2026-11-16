@@ -42,6 +42,11 @@ class SceneGroup(CamelModel):
         return f"{self.track:03d}_{self.direction.value}_{self.frame:03d}_{self.code}_{self.mode}"
 
 
+class ScenePass(CamelModel):
+    acquired_at: datetime
+    granule_id: str
+
+
 class ScenePlan(CamelModel):
     status: PlanStatus
     aoi: Aoi
@@ -49,5 +54,7 @@ class ScenePlan(CamelModel):
     window_end: datetime
     group: SceneGroup | None = None
     scenes: list[Scene] = Field(default_factory=list)
+    # Every pass of the chosen group in the window, oldest first; `scenes` are the ones picked.
+    passes: list[ScenePass] = Field(default_factory=list)
     maturity_mixed: bool = False
     notes: list[str] = Field(default_factory=list)

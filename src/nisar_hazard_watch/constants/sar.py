@@ -1,4 +1,5 @@
 import re
+from datetime import time
 from enum import StrEnum
 
 ASF_SEARCH_URL = "https://api.daac.asf.alaska.edu/services/search/param"
@@ -9,6 +10,11 @@ MIN_IMAGES = 4
 SPACING_DAYS = 30
 SPACING_TOLERANCE_DAYS = 6
 FULL_COVERAGE = 0.95
+# A user-chosen window: four passes at NISAR's 12-day repeat at least, and the gateway's year.
+DATE_RANGE_MIN_DAYS = 36
+DATE_RANGE_MAX_DAYS = 365
+# The last second of the user's end date, so a pass that day is inside the window.
+END_OF_DAY = time(23, 59, 59)
 
 AOI_SIDE_KM = 10.24
 MAX_POINT_LATITUDE = 89.9

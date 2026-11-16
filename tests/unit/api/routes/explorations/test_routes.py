@@ -34,6 +34,22 @@ FIRMS_HEADER = (
 )
 WILDFIRE_BODY = {"lens": "wildfire", "geometry": POINT}
 LONG_RUN_SECONDS = 10_000
+# Series 084_A_018 in the ASF fixture, and the five that a 1 Jun to 11 Nov range picks.
+SERIES_DAYS = [
+    "2026-06-20",
+    "2026-07-02",
+    "2026-07-14",
+    "2026-07-26",
+    "2026-08-19",
+    "2026-08-31",
+    "2026-09-12",
+    "2026-09-24",
+    "2026-10-06",
+    "2026-10-18",
+    "2026-10-30",
+    "2026-11-11",
+]
+RANGE_PICKS = ["2026-06-20", "2026-07-14", "2026-08-19", "2026-10-06", "2026-11-11"]
 FORWARDED_FOR = "X-Forwarded-For"
 EDGE_HOP = "100.64.0.1"
 
@@ -400,6 +416,47 @@ def test_coverage_checks_the_cache_with_the_optical_evidence_it_is_sent(
     assert flood_default.json()["etaSeconds"] == 0
     assert with_optical.json()["cache"] == "hit"
     assert without_optical.json()["cache"] == "miss"
+
+
+def test_an_exploration_and_its_coverage_take_a_date_range(
+    start_api: Callable[..., TestClient],
+) -> None:
+    # Arrange
+    client = start_api()
+    dates = {"startDate": "2026-06-01", "endDate": "2026-11-11"}
+    point = {"lon": QADIRABAD_LON, "lat": QADIRABAD_LAT, **dates}
+
+    # Act
+    created = client.post(url=URL, json={**BODY, **dates})
+    coverage = client.get(url="/api/v1/coverage", params=point)
+
+    # Assert
+    plan = created.json()["plan"]
+    assert created.status_code in (200, 202)
+    assert plan["dates"] == RANGE_PICKS
+    assert (plan["windowStart"], plan["windowEnd"]) == ("2026-06-01", "2026-11-11")
+    assert coverage.json()["plan"]["dates"] == RANGE_PICKS
+    assert [item["acquiredAt"][:10] for item in coverage.json()["passes"]] == SERIES_DAYS
+
+
+def test_a_date_range_that_cannot_be_planned_is_a_422_with_its_own_reason(
+    start_api: Callable[..., TestClient],
+) -> None:
+    # Arrange
+    client = start_api()
+    reversed_dates = {"startDate": "2026-10-31", "endDate": "2026-06-01"}
+
+    # Act
+    created = client.post(url=URL, json={**BODY, **reversed_dates})
+    coverage = client.get(
+        url="/api/v1/coverage",
+        params={"lon": QADIRABAD_LON, "lat": QADIRABAD_LAT, "startDate": "2026-06-01"},
+    )
+
+    # Assert
+    for response in (created, coverage):
+        assert response.status_code == 422
+        assert response.json()["reasonCode"] == ReasonCode.INVALID_DATE_RANGE
 
 
 def test_the_openapi_document_lists_the_new_endpoints(

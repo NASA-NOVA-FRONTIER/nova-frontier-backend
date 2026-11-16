@@ -23,11 +23,25 @@ from nisar_hazard_watch.constants.sar import Configuration, Direction, Maturity,
 from nisar_hazard_watch.models.base_model import CamelModel
 from nisar_hazard_watch.models.fire_context import FireContext
 from nisar_hazard_watch.models.insar_summary import InsarSummary
+from nisar_hazard_watch.models.scene import ScenePass
 from nisar_hazard_watch.models.science_products import ScienceProducts
 
 
 class ExplorationRequest(CamelModel):
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(
+        extra="forbid",
+        json_schema_extra={
+            "examples": [
+                {
+                    "lens": "flood_wetland",
+                    "geometry": {"type": "Point", "coordinates": [73.6967, 32.3214]},
+                    "opticalEvidence": True,
+                    "startDate": "2026-06-01",
+                    "endDate": "2026-10-31",
+                }
+            ]
+        },
+    )
 
     lens: Lens
     geometry: dict[str, Any]
@@ -37,6 +51,9 @@ class ExplorationRequest(CamelModel):
     coherence_threshold: float | None = Field(
         default=None, ge=MIN_COHERENCE_THRESHOLD, le=MAX_COHERENCE_THRESHOLD, allow_inf_nan=False
     )
+    # Both or neither; without them the planner reads its default window (the last 152 days).
+    start_date: date | None = None
+    end_date: date | None = None
 
     @model_validator(mode="after")
     def _pair_belongs_to_the_insar_lens(self) -> Self:
@@ -102,6 +119,9 @@ class PlanSummary(CamelModel):
     dates: list[date] = Field(default_factory=list)
     maturity_mixed: bool = False
     notes: list[str] = Field(default_factory=list)
+    # The window the catalog was read over: the user's range, or the default one.
+    window_start: date | None = None
+    window_end: date | None = None
 
 
 class ExplorationResult(CamelModel):
@@ -160,6 +180,8 @@ class CoverageView(CamelModel):
     cache: CacheState | None = None
     # The grid is only known once a job ran, so it comes from a cached answer and is null otherwise.
     grid: CoverageGrid | None = None
+    # Every pass of the chosen series in the window, oldest first; plan.dates are the ones picked.
+    passes: list[ScenePass] = Field(default_factory=list)
 
 
 class LensInfo(CamelModel):
