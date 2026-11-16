@@ -21,7 +21,7 @@ from tests.factories import make_job
 
 DATABASE_URL = os.environ.get("DATABASE_URL")
 PROBE_TIMEOUT_SECONDS = 5.0
-HEAD_REVISION = "0002"
+HEAD_REVISION = "0003"
 SECONDS_TO_FINISH = 30
 
 pytestmark = [
@@ -129,3 +129,42 @@ async def test_an_overdue_job_is_expired_and_stops_counting_as_active_on_postgre
     assert loaded is not None
     assert loaded.status is ExplorationStatus.PARTIAL
     assert loaded.error == timeout
+
+
+async def test_daily_allowance_counts_only_the_runs_that_spend_it_on_postgres() -> None:
+    # Arrange
+    get_settings.cache_clear()
+    engine = create_async_engine(get_settings().database_url)
+    session_factory = async_sessionmaker(engine, expire_on_commit=False)
+    repository = SqlJobRepository(session_factory=session_factory)
+    unique = uuid4().hex
+    client = unique[:32]
+    counted = make_job(
+        id=f"{EXPLORATION_ID_PREFIX}{unique[:16]}",
+        cache_key=unique * 2,
+        runner_id="run-1",
+        client_key=client,
+    )
+    cached = make_job(
+        id=f"{EXPLORATION_ID_PREFIX}{unique[16:32]}",
+        cache_key=unique * 2,
+        runner_id="run-2",
+        client_key=client,
+        counts_toward_limits=False,
+    )
+    since = counted.created_at - timedelta(seconds=1)
+
+    # Act
+    try:
+        await repository.add(job=counted)
+        await repository.add(job=cached)
+        spent = await repository.count_new_since(since=since, client_key=client)
+    finally:
+        async with session_factory() as session, session.begin():
+            await session.execute(
+                delete(ExplorationRecord).where(ExplorationRecord.client_key == client)
+            )
+        await engine.dispose()
+
+    # Assert
+    assert spent == 1
