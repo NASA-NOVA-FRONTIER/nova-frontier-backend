@@ -4,7 +4,7 @@ import logging
 import time
 import uuid
 from collections.abc import Callable
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, date, datetime, timedelta
 from typing import Any
 
 from nisar_hazard_watch.constants.errors import ReasonCode
@@ -51,6 +51,7 @@ from nisar_hazard_watch.constants.insar import (
 from nisar_hazard_watch.constants.routes import API_PREFIX, EXPLORATIONS_PREFIX
 from nisar_hazard_watch.constants.sar import PlanStatus
 from nisar_hazard_watch.exceptions.catalog_errors import CatalogUnavailableError
+from nisar_hazard_watch.exceptions.date_range_errors import InvalidDateRangeError
 from nisar_hazard_watch.exceptions.exploration_errors import (
     ExplorationNotFoundError,
     QueueFullError,
@@ -87,6 +88,7 @@ from nisar_hazard_watch.services.daily_limits import DailyLimits
 from nisar_hazard_watch.services.eta_estimator import EtaEstimator
 from nisar_hazard_watch.services.scene_planner import ScenePlanner
 from nisar_hazard_watch.utils.client_hash import hash_client_key
+from nisar_hazard_watch.utils.date_range import DateRange, checked_date_range
 from nisar_hazard_watch.utils.geometry import (
     aoi_center,
     aoi_from_geojson,
@@ -157,12 +159,18 @@ class ExplorationService:
                 "S-band is coming as a precomputed layer for a short list of areas; "
                 "this release serves L-band only"
             )
+        date_range = self._date_range(start=request.start_date, end=request.end_date)
+        if date_range is not None and request.lens is Lens.INSAR:
+            raise InvalidDateRangeError(
+                "the insar lens reads the dates of its pair; pick a pair from "
+                "GET /api/v1/insar/pairs?startDate=…&endDate=… instead"
+            )
         aoi = self._aoi(geometry=request.geometry)
         started = self._timer()
         plan = (
             self._insar_plan(aoi=aoi, request=request)
             if request.lens is Lens.INSAR
-            else await self._plan(aoi=aoi, request=request)
+            else await self._plan(aoi=aoi, request=request, date_range=date_range)
         )
         plan_seconds = round(self._timer() - started, 2)
         now = self._clock()
@@ -328,11 +336,14 @@ class ExplorationService:
         geometry: dict[str, Any],
         lens: Lens = DEFAULT_COVERAGE_LENS,
         optical_evidence: bool | None = None,
+        start_date: date | None = None,
+        end_date: date | None = None,
     ) -> CoverageView:
         if optical_evidence is None:
             optical_evidence = lens in DEFAULT_OPTICAL_LENSES
+        date_range = self._date_range(start=start_date, end=end_date)
         aoi = self._aoi(geometry=geometry)
-        plan = await self._planner.plan(aoi=aoi)
+        plan = await self._planner.plan(aoi=aoi, date_range=date_range)
         longitude, latitude = aoi_center(aoi=aoi)
         case = next(
             (
@@ -348,12 +359,17 @@ class ExplorationService:
             warnings=aoi.warnings,
             precomputed_case=case,
             lens=lens,
+            passes=plan.passes,
         )
         # Same rule as create(): with no coverage or no scenes nothing would run.
         if lens is Lens.INSAR or plan.status is PlanStatus.NO_COVERAGE or not plan.scenes:
             return view
         request = ExplorationRequest(
-            lens=lens, geometry=geometry, optical_evidence=optical_evidence
+            lens=lens,
+            geometry=geometry,
+            optical_evidence=optical_evidence,
+            start_date=start_date,
+            end_date=end_date,
         )
         now = self._clock()
         fresh = await self._repository.find_fresh(
@@ -421,9 +437,14 @@ class ExplorationService:
             pair_id=request.pair_id, coherence_threshold=request.coherence_threshold
         )
 
-    async def _plan(self, aoi: Aoi, request: ExplorationRequest) -> ScenePlan:
+    def _date_range(self, start: date | None, end: date | None) -> DateRange | None:
+        return checked_date_range(start=start, end=end, today=self._clock().date())
+
+    async def _plan(
+        self, aoi: Aoi, request: ExplorationRequest, date_range: DateRange | None
+    ) -> ScenePlan:
         try:
-            return await self._planner.plan(aoi=aoi)
+            return await self._planner.plan(aoi=aoi, date_range=date_range)
         except CatalogUnavailableError as exc:
             longitude, latitude = aoi_center(aoi=aoi)
             case = self._cases.find(longitude=longitude, latitude=latitude, lens=request.lens)
@@ -760,6 +781,8 @@ class ExplorationService:
             dates=[scene.acquired_at.date() for scene in plan.scenes],
             maturity_mixed=plan.maturity_mixed,
             notes=plan.notes,
+            window_start=plan.window_start.date(),
+            window_end=plan.window_end.date(),
         )
 
     @staticmethod
@@ -785,5 +808,8 @@ class ExplorationService:
         }
         if request.lens is Lens.INSAR:
             identity |= {"pair": request.pair_id, "coherence": request.coherence_threshold}
+        # Only a user's range joins the identity, so default-window entries keep their keys.
+        if request.start_date is not None and request.end_date is not None:
+            identity |= {"range": [request.start_date.isoformat(), request.end_date.isoformat()]}
         encoded = json.dumps(identity, sort_keys=True, separators=(",", ":"))
         return hashlib.sha256(encoded.encode()).hexdigest()

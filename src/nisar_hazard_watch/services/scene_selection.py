@@ -1,5 +1,5 @@
 from collections import defaultdict
-from datetime import timedelta
+from datetime import datetime, timedelta
 from statistics import mean
 
 from nisar_hazard_watch.constants.sar import (
@@ -64,6 +64,27 @@ def _group_score(members: list[Scene]) -> tuple:
         len({scene.acquired_at for scene in members}),
         max(scene.acquired_at for scene in members),
     )
+
+
+def select_spread(
+    scenes: list[Scene], start: datetime, end: datetime, max_images: int
+) -> list[Scene]:
+    """The scene nearest each of `max_images` evenly spaced targets from start to end, once each.
+
+    Two targets that land on the same pass keep it once; on a tie the earlier scene wins.
+    """
+    if not scenes or max_images < 1:
+        return []
+    step = (end - start) / max(max_images - 1, 1)
+    selected: list[Scene] = []
+    for index in range(max_images):
+        wanted = start + step * index
+        nearest = min(
+            scenes, key=lambda scene: (abs(scene.acquired_at - wanted), scene.acquired_at)
+        )
+        if nearest not in selected:
+            selected.append(nearest)
+    return sorted(selected, key=lambda scene: scene.acquired_at)
 
 
 def select_dates(
