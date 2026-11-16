@@ -2,18 +2,25 @@ import logging
 import re
 from http import HTTPStatus
 from typing import Any
+from urllib.parse import quote
 
 import httpx
 from pydantic import ValidationError
 
 from nisar_hazard_watch.constants.cases import (
     CASE_FALLBACK_LIMITATIONS,
+    CASE_SERIES_PATH,
+    CASE_SERIES_UNAVAILABLE_DETAIL,
     CASES_PATH,
     CASES_UNAVAILABLE_DETAIL,
     FORBIDDEN_EVIDENCE_WORDS,
 )
-from nisar_hazard_watch.exceptions.case_errors import CasesUnavailableError
+from nisar_hazard_watch.exceptions.case_errors import (
+    CaseSeriesUnavailableError,
+    CasesUnavailableError,
+)
 from nisar_hazard_watch.models.case import CaseView
+from nisar_hazard_watch.models.case_series import CaseSeriesView
 from nisar_hazard_watch.utils.gateway_layers import gateway_url, layer_kind, layer_title
 
 logger = logging.getLogger(__name__)
@@ -35,6 +42,11 @@ def _scrub(value: Any) -> Any:
     if isinstance(value, list):
         return [_scrub(item) for item in value]
     return value
+
+
+def _granule(source: dict[str, Any]) -> str | None:
+    name = source.get("granule") or source.get("title")
+    return str(name) if name else None
 
 
 def _file_name(path: str) -> str:
@@ -117,5 +129,53 @@ class GatewayCaseCatalog:
                 ],
                 "is_demo": item["isDemo"],
                 "limitations": evidence.get("limitations") or list(CASE_FALLBACK_LIMITATIONS),
+            }
+        )
+
+    async def series(self, case_id: str) -> CaseSeriesView:
+        try:
+            response = await self._client.get(
+                self._base_url + CASE_SERIES_PATH.format(case_id=quote(case_id, safe=""))
+            )
+            payload = response.json()
+        except (httpx.HTTPError, ValueError) as exc:
+            logger.warning("case series request failed: %s", type(exc).__name__)
+            raise CaseSeriesUnavailableError(CASE_SERIES_UNAVAILABLE_DETAIL) from exc
+        if response.status_code != HTTPStatus.OK or not isinstance(payload, dict):
+            logger.warning("case series answered %s", response.status_code)
+            raise CaseSeriesUnavailableError(CASE_SERIES_UNAVAILABLE_DETAIL)
+        try:
+            return self._series(case_id=case_id, payload=payload)
+        except (KeyError, TypeError, ValueError, ValidationError) as exc:
+            logger.warning("case series of %s is malformed", case_id)
+            raise CaseSeriesUnavailableError(CASE_SERIES_UNAVAILABLE_DETAIL) from exc
+
+    @staticmethod
+    def _series(case_id: str, payload: dict[str, Any]) -> CaseSeriesView:
+        # The extension's cases name the granule `granule`; the first release named it `title`.
+        observations = [
+            {**row, "granule": _granule(row.get("source") or {})}
+            for row in payload.get("observations") or []
+        ]
+        readouts = {
+            relayed: _scrub(payload[sent])
+            for sent, relayed in (
+                ("point_readout", "point_readout"),
+                ("area_readout", "window_readout"),
+            )
+            if isinstance(payload.get(sent), dict)
+        }
+        return CaseSeriesView.model_validate(
+            {
+                "case_id": case_id,
+                "point": payload.get("point"),
+                "selected_pixel": payload.get("selected_pixel"),
+                "target_date": payload.get("target_date"),
+                "observations": observations,
+                "observed_groups": payload.get("observed_groups") or [],
+                "diagnostic_band_timeline": payload.get("diagnostic_band_timeline") or [],
+                "intervals": payload.get("intervals") or [],
+                "spatial_iqr_semantics": payload.get("spatial_iqr_semantics"),
+                **readouts,
             }
         )

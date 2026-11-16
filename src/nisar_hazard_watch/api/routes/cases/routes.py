@@ -7,6 +7,7 @@ from nisar_hazard_watch.api.dependencies import CaseServiceDep, RateLimit
 from nisar_hazard_watch.constants.cases import CASE_ID_PATTERN
 from nisar_hazard_watch.constants.routes import LAYER_ID_PATTERN
 from nisar_hazard_watch.models.case import CasesView, CaseView
+from nisar_hazard_watch.models.case_series import CaseSeriesView
 
 router = APIRouter(tags=["cases"])
 
@@ -22,6 +23,11 @@ async def list_cases(service: CaseServiceDep) -> CasesView:
 @router.get("/{case_id}", response_model=CaseView, dependencies=[RateLimit])
 async def get_case(case_id: CaseId, service: CaseServiceDep) -> CaseView:
     return await service.get(case_id=case_id)
+
+
+@router.get("/{case_id}/series", response_model=CaseSeriesView, dependencies=[RateLimit])
+async def get_case_series(case_id: CaseId, service: CaseServiceDep) -> CaseSeriesView:
+    return await service.series(case_id=case_id)
 
 
 # Not rate-limited: opening one case asks for every one of its layers at once.

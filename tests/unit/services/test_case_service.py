@@ -12,6 +12,7 @@ from nisar_hazard_watch.exceptions.case_errors import (
     CasesUnavailableError,
 )
 from nisar_hazard_watch.models.case import CaseView
+from nisar_hazard_watch.models.case_series import CaseSeriesView
 from nisar_hazard_watch.services.case_service import CaseService
 
 FIXTURE = Path(__file__).parents[2] / "fixtures" / "ml_gateway_cases.json"
@@ -31,6 +32,7 @@ async def _real_cases() -> list[CaseView]:
 class FakeCatalog:
     def __init__(self, cases: list[CaseView]) -> None:
         self.calls = 0
+        self.series_calls: list[str] = []
         self.down = False
         self.cases_to_answer = cases
         # Cleared to hold every call open, like a gateway that takes seconds to answer.
@@ -43,6 +45,10 @@ class FakeCatalog:
         if self.down:
             raise CasesUnavailableError("down")
         return self.cases_to_answer
+
+    async def series(self, case_id: str) -> CaseSeriesView:
+        self.series_calls.append(case_id)
+        return CaseSeriesView(case_id=case_id)
 
 
 class FakeClock:
@@ -276,3 +282,34 @@ async def test_an_unknown_case_or_layer_is_not_found(catalog: FakeCatalog) -> No
         await service.get(case_id="nope")
     with pytest.raises(CaseLayerNotFoundError):
         await service.layer_url(case_id="qadirabad", layer_id="nope")
+
+
+async def test_a_series_is_read_once_per_case_and_an_unknown_case_never_reaches_the_gateway(
+    catalog: FakeCatalog,
+) -> None:
+    # Arrange
+    service = _service(catalog=catalog, clock=FakeClock())
+
+    # Act
+    first = await service.series(case_id="qadirabad")
+    again = await service.series(case_id="qadirabad")
+    with pytest.raises(CaseNotFoundError):
+        await service.series(case_id="atlantis")
+
+    # Assert
+    assert first.case_id == again.case_id == "qadirabad"
+    assert catalog.series_calls == ["qadirabad"]
+
+
+async def test_a_series_is_read_again_once_its_copy_expires(catalog: FakeCatalog) -> None:
+    # Arrange
+    clock = FakeClock()
+    service = _service(catalog=catalog, clock=clock)
+    await service.series(case_id="qadirabad")
+
+    # Act
+    clock.now += TTL_SECONDS
+    await service.series(case_id="qadirabad")
+
+    # Assert
+    assert catalog.series_calls == ["qadirabad", "qadirabad"]
