@@ -40,6 +40,7 @@ For a point or a drawn area it plans the scenes to read from the public ASF cata
 | `GET` | `/insar/pairs` | NISAR L-band interferometric pairs over a point, newest first |
 | `GET` | `/lenses` | The lenses, what each one shows and how many dates it needs |
 | `GET` | `/places` | Place search for the globe |
+| `GET`, `POST` | `/assistant` | Whether Nova answers with Claude; Nova's answer about the result on screen, streamed as server-sent events |
 | `GET` | `/health`, `/health/live` | Dependency report and liveness check |
 
 Details of each endpoint are in [API](#api).
@@ -113,6 +114,9 @@ Environment variables (see `.env.example`). The app fails at start-up on a malfo
 | `FIRMS_MAP_KEY` | unset | Free NASA FIRMS key for the wildfire lens' independent fire context; without it the wildfire answer says `notConfigured` and stays radar-only. It travels in the FIRMS URL path, so `httpx` request logging is silenced; never logged or returned |
 | `FIRMS_URL` | `https://firms.modaps.eosdis.nasa.gov` | FIRMS base URL |
 | `FIRMS_TIMEOUT_SECONDS`, `FIRE_CONTEXT_TIMEOUT_SECONDS` | `10`, `15` | Per-request timeout and total budget of the fire context lookup (> 0); a slower lookup is reported as `unavailable`, never as an error |
+| `ANTHROPIC_API_KEY` | unset | Claude key for Nova's answers (`POST /api/v1/assistant`). Without it the endpoint answers `503 ASSISTANT_UNAVAILABLE` and the chat keeps its rule-based answers. A Railway variable only; never logged or returned |
+| `ASSISTANT_MODEL` | `claude-opus-5-5` | The Claude model behind Nova. Server-side fallback on a declined answer is sent only for models that accept it |
+| `ASSISTANT_RATE_LIMIT_PER_MINUTE`, `ASSISTANT_DAILY_TOKEN_LIMIT` | `6`, `1000000` | Questions per client per minute, and the tokens (in and out) all clients may use per UTC day; above it the endpoint answers `429 ASSISTANT_BUDGET_EXHAUSTED` until 00:00 UTC |
 
 ## API
 
@@ -130,6 +134,8 @@ Environment variables (see `.env.example`). The app fails at start-up on a malfo
 | `GET /api/v1/lenses` | The supported lenses and how many dates they need |
 | `GET /api/v1/insar/pairs?lon=&lat=&startDate=&endDate=` | NISAR L-band interferometric (GUNW) pairs over a point, newest first, listed from the public catalog through the ML gateway (default window: the last 180 days, at most 366). Rate-limited like explorations |
 | `GET /api/v1/coverage?lon=&lat=` | The scene plan for a point without running anything |
+| `GET /api/v1/assistant` | `{available, model}`: whether a key is set and today's budget is left, so the chat labels its answers before anyone asks |
+| `POST /api/v1/assistant` | Nova's answer `{message, history[], context}` (`context` is the frontend's summary of the result on screen, read by the model as data, never as instructions). Streams `text/event-stream`: `delta` events with text, then `done` or `error` (`ASSISTANT_DECLINED`, `UPSTREAM_ASSISTANT_ERROR`). Refused before streaming with `503 ASSISTANT_UNAVAILABLE` (no key), `429 RATE_LIMITED` or `429 ASSISTANT_BUDGET_EXHAUSTED`. The system prompt forbids causes, probabilities, hectares, displacement and invented numbers |
 | `GET /api/v1/cases` | The known cases measured ahead of time on the ML gateway (`/v2/cases`), in its order: id, title, point, status and the baseline and assessment dates. Kept in memory for 10 minutes and refreshed in the background, so a copy is served at once; after a gateway failure it is not called again for 60 s. With no copy the answer is `502 CASES_UNAVAILABLE`. Known `status` values: `partial`, `complete`, `not_displacement_ready`, `evaluated`. Rate-limited |
 | `GET /api/v1/cases/{id}` | One case: grid, series key, allow-listed evidence (cell counts, threshold policy, optical comparison, sources, pair, common support, radar signatures and their policy, radar comparator, regional context and lens; never area, hectares, probability, depth, displacement or cause), layers (with `title` and `kind`), visualizations, `limitations`, `scientificStatus` and `isDemo`. Unknown id: `404 CASE_NOT_FOUND`. Rate-limited |
 | `GET /api/v1/cases/{id}/layers/{layerId}` | `307` redirect to the layer or visualization image on the ML gateway |

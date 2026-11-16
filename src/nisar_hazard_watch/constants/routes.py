@@ -7,6 +7,7 @@ COVERAGE_PREFIX = "/coverage"
 INSAR_PREFIX = "/insar"
 PLACES_PREFIX = "/places"
 CASES_PREFIX = "/cases"
+ASSISTANT_PREFIX = "/assistant"
 CLIENT_IP_HEADER = "X-Forwarded-For"
 UNKNOWN_CLIENT = "unknown"
 
