@@ -14,6 +14,7 @@ from nisar_hazard_watch.constants.assistant import (
 )
 from nisar_hazard_watch.constants.environments import Environment
 from nisar_hazard_watch.constants.explorations import RunnerKind
+from nisar_hazard_watch.constants.limits import DEFAULT_DAILY_LIMIT_APP, DEFAULT_DAILY_LIMIT_CLIENT
 from nisar_hazard_watch.constants.log_levels import LogLevel
 from nisar_hazard_watch.constants.places import DEFAULT_GEOCODER_URL
 from nisar_hazard_watch.utils.database_url import to_async_database_url
@@ -35,6 +36,7 @@ SECRET_FIELDS = (
     "modal_token_secret",
     "firms_map_key",
     "anthropic_api_key",
+    "gateway_shared_secret",
 )
 
 
@@ -66,12 +68,17 @@ class Settings(BaseSettings):
     exploration_deadline_seconds: float = Field(default=DEFAULT_EXPLORATION_DEADLINE_SECONDS, gt=0)
     exploration_cache_ttl_seconds: float = Field(default=86400.0, gt=0)
     rate_limit_per_minute: int = Field(default=20, ge=1)
+    daily_limit_app: int = Field(default=DEFAULT_DAILY_LIMIT_APP, ge=1)
+    daily_limit_client: int = Field(default=DEFAULT_DAILY_LIMIT_CLIENT, ge=1)
     trusted_proxy_hops: int = Field(default=DEFAULT_TRUSTED_PROXY_HOPS, ge=0)
     eta_prior_seconds: float = Field(default=DEFAULT_ETA_PRIOR_SECONDS, gt=0)
     precomputed_cases_path: str | None = None
     earthdata_token: SecretStr | None = None
     modal_token_id: SecretStr | None = None
     modal_token_secret: SecretStr | None = None
+    # Sent as a bearer token on every job submission to the ML gateway; the gateway starts
+    # requiring it once its own switch is on, so the backend can send it before that happens.
+    gateway_shared_secret: SecretStr | None = None
     firms_map_key: SecretStr | None = None
     # Nova's Claude answers (#31): without a key the chat keeps its rule-based answers.
     anthropic_api_key: SecretStr | None = None

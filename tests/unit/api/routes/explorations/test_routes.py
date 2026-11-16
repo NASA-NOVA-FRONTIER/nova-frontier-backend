@@ -540,3 +540,76 @@ def test_a_flood_answer_has_no_fire_context(start_api: Callable[..., TestClient]
 
     # Assert
     assert response.json()["result"].get("fireContext") is None
+
+
+def test_a_client_over_its_daily_limit_gets_429_with_retry_after_and_the_limits_follow(
+    start_api: Callable[..., TestClient],
+) -> None:
+    # Arrange
+    client = start_api(daily_limit_client=1)
+    client.post(url=URL, json=BODY)
+
+    # Act
+    refused = client.post(url=URL, json={**BODY, "lens": "vegetation_disturbance"})
+    limits = client.get(url="/api/v1/limits").json()
+
+    # Assert
+    assert refused.status_code == 429
+    assert refused.json()["reasonCode"] == ReasonCode.DAILY_LIMIT_REACHED
+    assert int(refused.headers["Retry-After"]) > 0
+    assert limits["remainingClient"] == 0
+    assert limits["remainingApp"] == limits["limitApp"] - 1
+
+
+def test_the_minute_rate_limit_also_tells_the_client_when_to_retry(
+    start_api: Callable[..., TestClient],
+) -> None:
+    # Arrange
+    client = start_api(rate_limit_per_minute=1)
+    client.post(url=URL, json=BODY)
+
+    # Act
+    refused = client.post(url=URL, json=BODY)
+
+    # Assert
+    assert refused.status_code == 429
+    assert refused.json()["reasonCode"] == ReasonCode.RATE_LIMITED
+    assert 0 < int(refused.headers["Retry-After"]) <= 60
+
+
+def test_the_gateway_receives_the_shared_secret_when_a_new_exploration_starts(
+    make_settings: Callable[..., Settings], tmp_path: Path
+) -> None:
+    # Arrange
+    database = tmp_path / "gateway.db"
+    engine = create_engine(f"sqlite:///{database}")
+    Base.metadata.create_all(engine)
+    engine.dispose()
+    seen: list[httpx.Request] = []
+
+    def gateway(request: httpx.Request) -> httpx.Response:
+        seen.append(request)
+        return httpx.Response(
+            status_code=202,
+            json={"job_id": "a" * 32, "status": "queued", "cache": "miss", "result": None},
+        )
+
+    settings = make_settings(
+        database_url=f"sqlite+aiosqlite:///{database}",
+        runner=RunnerKind.GATEWAY,
+        gateway_shared_secret=SecretStr("a-long-shared-secret-value"),
+    )
+    app = create_app(
+        settings=settings,
+        asf_transport=_asf_catalog(),
+        gateway_transport=httpx.MockTransport(gateway),
+    )
+
+    # Act
+    with TestClient(app) as client:
+        response = client.post(url=URL, json=BODY)
+
+    # Assert
+    assert response.status_code == 202
+    assert seen[0].headers["Authorization"] == "Bearer a-long-shared-secret-value"
+    assert "a-long-shared-secret-value" not in response.text

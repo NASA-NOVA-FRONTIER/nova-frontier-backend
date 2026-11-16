@@ -23,6 +23,7 @@ from nisar_hazard_watch.constants.explorations import (
     ScienceStatus,
     TimingKey,
 )
+from nisar_hazard_watch.constants.headers import AUTHORIZATION_HEADER, BEARER_PREFIX
 from nisar_hazard_watch.constants.insar import INSAR_OPERATION
 from nisar_hazard_watch.constants.sar import Configuration, Maturity
 from nisar_hazard_watch.exceptions.exploration_errors import QueueFullError, RunnerUnavailableError
@@ -52,6 +53,7 @@ JOBS_PATH = "/v2/jobs"
 ASSET_NAME = re.compile(r"[A-Za-z0-9._-]{1,180}")
 OBSERVATION_LAYER = re.compile(r"display_(\d{4}-\d{2}-\d{2})_(?:[A-Z]+|\d+)")
 BUSY_STATUSES = (HTTPStatus.TOO_MANY_REQUESTS, HTTPStatus.SERVICE_UNAVAILABLE)
+UNAUTHORIZED_STATUSES = (HTTPStatus.UNAUTHORIZED, HTTPStatus.FORBIDDEN)
 UNEXPECTED_ANSWER = "the analysis service answered unexpectedly"
 STATE_BY_GATEWAY_STATUS = {
     GatewayStatus.QUEUED.value: RunnerState.QUEUED,
@@ -76,13 +78,21 @@ def _collection(scene: Scene) -> str:
 class GatewayRunner:
     """Runs explorations on the ML service gateway (Modal) with the backend's scene plan."""
 
-    def __init__(self, client: httpx.AsyncClient, base_url: str) -> None:
+    def __init__(
+        self, client: httpx.AsyncClient, base_url: str, shared_secret: str | None = None
+    ) -> None:
         self._client = client
         self._base_url = base_url.rstrip("/")
+        self._shared_secret = shared_secret
 
     async def submit(self, job: RunnerJob) -> RunnerTicket:
         body = self._body(job=job)
-        response = await self._request("POST", JOBS_PATH, json=body)
+        headers = (
+            {AUTHORIZATION_HEADER: BEARER_PREFIX + self._shared_secret}
+            if self._shared_secret
+            else {}
+        )
+        response = await self._request("POST", JOBS_PATH, json=body, headers=headers)
         return self._ticket(payload=self._payload(response=response))
 
     async def poll(self, run_id: str) -> RunnerTicket:
@@ -160,6 +170,9 @@ class GatewayRunner:
 
     @staticmethod
     def _unexpected(response: httpx.Response) -> RunnerUnavailableError:
+        if response.status_code in UNAUTHORIZED_STATUSES:
+            logger.error("ML gateway refused the backend's credentials (%s)", response.status_code)
+            return RunnerUnavailableError(UNEXPECTED_ANSWER)
         logger.warning("ML gateway answered %s: %s", response.status_code, response.text[:300])
         return RunnerUnavailableError(UNEXPECTED_ANSWER)
 

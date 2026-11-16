@@ -3,7 +3,7 @@ from typing import Annotated
 from fastapi import APIRouter, Path, Response
 from fastapi.responses import RedirectResponse
 
-from nisar_hazard_watch.api.dependencies import ExplorationServiceDep, RateLimit
+from nisar_hazard_watch.api.dependencies import ClientDep, ExplorationServiceDep, RateLimit
 from nisar_hazard_watch.constants.routes import LAYER_ID_PATTERN
 from nisar_hazard_watch.models.exploration import ExplorationRequest, ExplorationView
 
@@ -22,9 +22,12 @@ AssetName = Annotated[str, Path(pattern=r"^[A-Za-z0-9._-]{1,180}$")]
     dependencies=[RateLimit],
 )
 async def create_exploration(
-    body: ExplorationRequest, service: ExplorationServiceDep, response: Response
+    body: ExplorationRequest,
+    service: ExplorationServiceDep,
+    response: Response,
+    client: ClientDep,
 ) -> ExplorationView:
-    view, final = await service.create(request=body)
+    view, final = await service.create(request=body, client=client)
     if final:
         response.status_code = 200
     return view
@@ -45,9 +48,12 @@ async def get_exploration(
     dependencies=[RateLimit],
 )
 async def create_analysis(
-    exploration_id: ExplorationId, service: ExplorationServiceDep, response: Response
+    exploration_id: ExplorationId,
+    service: ExplorationServiceDep,
+    response: Response,
+    client: ClientDep,
 ) -> ExplorationView:
-    view, final = await service.create_analysis(exploration_id=exploration_id)
+    view, final = await service.create_analysis(exploration_id=exploration_id, client=client)
     if final:
         response.status_code = 200
     return view

@@ -105,6 +105,17 @@ class SqlJobRepository:
         async with self._session_factory() as session:
             return int((await session.execute(statement)).scalar_one())
 
+    async def count_new_since(self, since: datetime, client_key: str | None = None) -> int:
+        statement = select(func.count()).where(
+            ExplorationRecord.created_at >= since,
+            ExplorationRecord.runner_id.is_not(None),
+            ExplorationRecord.counts_toward_limits.is_(True),
+        )
+        if client_key is not None:
+            statement = statement.where(ExplorationRecord.client_key == client_key)
+        async with self._session_factory() as session:
+            return int((await session.execute(statement)).scalar_one())
+
     async def find_fresh(self, cache_key: str, newer_than: datetime) -> ExplorationJob | None:
         statement = (
             select(ExplorationRecord)

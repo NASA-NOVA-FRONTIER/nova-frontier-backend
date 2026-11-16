@@ -25,6 +25,7 @@ from nisar_hazard_watch.ports.analysis_runner import AnalysisRunner
 from nisar_hazard_watch.ports.assistant_model import AssistantModel
 from nisar_hazard_watch.services.assistant_service import AssistantService
 from nisar_hazard_watch.services.case_service import CaseService
+from nisar_hazard_watch.services.daily_limits import DailyLimits
 from nisar_hazard_watch.services.eta_estimator import EtaEstimator
 from nisar_hazard_watch.services.exploration_service import ExplorationService
 from nisar_hazard_watch.services.health_service import HealthService
@@ -72,22 +73,38 @@ def build_case_service(settings: Settings, gateway_client: httpx.AsyncClient) ->
     )
 
 
+def build_daily_limits(settings: Settings, engine: AsyncEngine) -> DailyLimits:
+    return DailyLimits(
+        repository=SqlJobRepository(
+            session_factory=async_sessionmaker(engine, expire_on_commit=False)
+        ),
+        app_limit=settings.daily_limit_app,
+        client_limit=settings.daily_limit_client,
+    )
+
+
 def build_exploration_service(
     settings: Settings,
     engine: AsyncEngine,
     asf_client: httpx.AsyncClient,
     gateway_client: httpx.AsyncClient,
     firms_client: httpx.AsyncClient,
+    limits: DailyLimits,
     runner: AnalysisRunner | None = None,
 ) -> ExplorationService:
     repository = SqlJobRepository(
         session_factory=async_sessionmaker(engine, expire_on_commit=False)
     )
     if runner is None:
+        shared_secret = settings.gateway_shared_secret
         runner = (
             InProcessRunner()
             if settings.runner is RunnerKind.IN_PROCESS
-            else GatewayRunner(client=gateway_client, base_url=settings.ml_gateway_url)
+            else GatewayRunner(
+                client=gateway_client,
+                base_url=settings.ml_gateway_url,
+                shared_secret=shared_secret.get_secret_value() if shared_secret else None,
+            )
         )
     fire_source = (
         FirmsClient(
@@ -108,6 +125,7 @@ def build_exploration_service(
         fire_context=FirmsFireContextProvider(
             source=fire_source, timeout_seconds=settings.fire_context_timeout_seconds
         ),
+        limits=limits,
     )
 
 

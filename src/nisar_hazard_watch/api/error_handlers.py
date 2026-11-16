@@ -64,6 +64,7 @@ async def handle_app_error(request: Request, exc: AppError) -> JSONResponse:
         reason_code=exc.reason_code,
         title=exc.title,
         detail=detail,
+        headers=exc.headers or None,
     )
 
 

@@ -83,8 +83,10 @@ from nisar_hazard_watch.ports.analysis_runner import (
 from nisar_hazard_watch.ports.fire_context_provider import FireContextProvider
 from nisar_hazard_watch.ports.job_repository import ExplorationJob, JobRepository
 from nisar_hazard_watch.ports.precomputed_cases import PrecomputedCases
+from nisar_hazard_watch.services.daily_limits import DailyLimits
 from nisar_hazard_watch.services.eta_estimator import EtaEstimator
 from nisar_hazard_watch.services.scene_planner import ScenePlanner
+from nisar_hazard_watch.utils.client_hash import hash_client_key
 from nisar_hazard_watch.utils.geometry import (
     aoi_center,
     aoi_from_geojson,
@@ -129,6 +131,7 @@ class ExplorationService:
         deadline_seconds: float,
         cache_ttl_seconds: float,
         fire_context: FireContextProvider | None = None,
+        limits: DailyLimits | None = None,
         clock: Callable[[], datetime] = _utc_now,
         timer: Callable[[], float] = time.monotonic,
     ) -> None:
@@ -141,10 +144,13 @@ class ExplorationService:
         self._deadline_seconds = deadline_seconds
         self._cache_ttl_seconds = cache_ttl_seconds
         self._fire_context = fire_context
+        self._limits = limits
         self._clock = clock
         self._timer = timer
 
-    async def create(self, request: ExplorationRequest) -> tuple[ExplorationView, bool]:
+    async def create(
+        self, request: ExplorationRequest, client: str | None = None
+    ) -> tuple[ExplorationView, bool]:
         """Return the exploration and whether it is already final (cache hit or nothing to run)."""
         if request.source is SourceBand.S_BAND:
             raise SourceNotAvailableError(
@@ -178,6 +184,7 @@ class ExplorationService:
         if fresh is not None:
             fresh = await self._with_fire_context(job=fresh)
             return await self._view(job=fresh, cache=CacheState.HIT), True
+        await self._require_daily_allowance(client=client)
         await self._repository.expire_overdue(now=now, error=self._timeout_error())
         await self._require_capacity(
             request=request, scenes_total=scenes_total, bucket=bucket, now=now
@@ -209,12 +216,16 @@ class ExplorationService:
             timings={ETA_TIMING_KEY: eta},
             created_at=now,
             deadline_at=now + timedelta(seconds=self._deadline_seconds),
+            client_key=self._client_key(client=client),
+            counts_toward_limits=not ticket.cached,
         )
         job = await self._with_fire_context(job=self._apply(job=job, ticket=ticket, now=now))
         await self._repository.add(job=job)
         return await self._view(job=job), job.status not in ACTIVE_STATUSES
 
-    async def create_analysis(self, exploration_id: str) -> tuple[ExplorationView, bool]:
+    async def create_analysis(
+        self, exploration_id: str, client: str | None = None
+    ) -> tuple[ExplorationView, bool]:
         parent = await self._load(exploration_id=exploration_id)
         plan = parent.plan
         if (
@@ -245,6 +256,7 @@ class ExplorationService:
         if active is not None:
             view = await self.get(exploration_id=active.id)
             return view, view.status not in ACTIVE_STATUSES
+        await self._require_daily_allowance(client=client)
         if await self._repository.count_active(now=now) >= self._max_active:
             raise QueueFullError("the analysis service is at capacity; retry shortly")
 
@@ -266,6 +278,8 @@ class ExplorationService:
             plan=plan.model_copy(update={"scenes": [], "maturity_mixed": False}),
             created_at=now,
             deadline_at=now + timedelta(seconds=REGIONAL_DEADLINE_SECONDS),
+            client_key=self._client_key(client=client),
+            counts_toward_limits=not ticket.cached,
         )
         job = self._apply(job=job, ticket=ticket, now=now)
         await self._repository.add(job=job)
@@ -418,6 +432,14 @@ class ExplorationService:
             raise CatalogUnavailableError(
                 f"{exc.detail}; the precomputed case {case.id!r} ({case.title}) is available"
             ) from exc
+
+    async def _require_daily_allowance(self, client: str | None) -> None:
+        if self._limits is not None:
+            await self._limits.require(client=client)
+
+    @staticmethod
+    def _client_key(client: str | None) -> str | None:
+        return hash_client_key(client=client) if client is not None else None
 
     async def _require_capacity(
         self, request: ExplorationRequest, scenes_total: int, bucket: str, now: datetime

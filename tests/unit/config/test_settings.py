@@ -8,6 +8,7 @@ from nisar_hazard_watch.constants.assistant import (
 )
 from nisar_hazard_watch.constants.environments import Environment
 from nisar_hazard_watch.constants.explorations import RunnerKind
+from nisar_hazard_watch.constants.limits import DEFAULT_DAILY_LIMIT_APP, DEFAULT_DAILY_LIMIT_CLIENT
 from nisar_hazard_watch.constants.log_levels import LogLevel
 
 LOCAL_ORIGIN = "http://localhost:5173"
@@ -294,3 +295,42 @@ def test_the_assistant_defaults_to_opus_with_a_tight_limit_and_a_daily_ceiling()
     assert settings.assistant_model == DEFAULT_ASSISTANT_MODEL
     assert settings.assistant_rate_limit_per_minute < settings.rate_limit_per_minute
     assert settings.assistant_daily_token_limit == DEFAULT_ASSISTANT_DAILY_TOKEN_LIMIT
+
+
+def test_daily_limits_default_to_the_documented_values_and_can_be_set_by_environment(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # Arrange
+    defaults = Settings()
+    monkeypatch.setenv("DAILY_LIMIT_APP", "40")
+    monkeypatch.setenv("DAILY_LIMIT_CLIENT", "3")
+
+    # Act
+    configured = Settings()
+
+    # Assert
+    assert (defaults.daily_limit_app, defaults.daily_limit_client) == (
+        DEFAULT_DAILY_LIMIT_APP,
+        DEFAULT_DAILY_LIMIT_CLIENT,
+    )
+    assert (configured.daily_limit_app, configured.daily_limit_client) == (40, 3)
+
+
+def test_the_gateway_shared_secret_is_optional_hidden_and_blank_means_missing(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # Arrange
+    unset = Settings()
+    monkeypatch.setenv("GATEWAY_SHARED_SECRET", "   ")
+    blank = Settings()
+    monkeypatch.setenv("GATEWAY_SHARED_SECRET", SECRET_VALUE)
+
+    # Act
+    configured = Settings()
+
+    # Assert
+    assert unset.gateway_shared_secret is None
+    assert blank.gateway_shared_secret is None
+    assert configured.gateway_shared_secret is not None
+    assert configured.gateway_shared_secret.get_secret_value() == SECRET_VALUE
+    assert SECRET_VALUE not in repr(configured)

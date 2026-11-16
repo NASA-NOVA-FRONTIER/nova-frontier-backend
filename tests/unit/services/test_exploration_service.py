@@ -4,6 +4,7 @@ from datetime import timedelta
 import pytest
 
 from nisar_hazard_watch.adapters.cases.static_precomputed_cases import StaticPrecomputedCases
+from nisar_hazard_watch.adapters.db.job_repository import SqlJobRepository
 from nisar_hazard_watch.constants.errors import ReasonCode
 from nisar_hazard_watch.constants.explorations import (
     CacheState,
@@ -18,6 +19,7 @@ from nisar_hazard_watch.constants.fire_context import WILDFIRE_LIMITATION, FireC
 from nisar_hazard_watch.constants.sar import PlanStatus
 from nisar_hazard_watch.exceptions.catalog_errors import CatalogUnavailableError
 from nisar_hazard_watch.exceptions.exploration_errors import (
+    DailyLimitReachedError,
     ExplorationNotFoundError,
     QueueFullError,
     RunnerUnavailableError,
@@ -35,7 +37,9 @@ from nisar_hazard_watch.models.science_products import (
 )
 from nisar_hazard_watch.ports.analysis_runner import RunnerLayer, RunnerTicket
 from nisar_hazard_watch.ports.precomputed_cases import PrecomputedCase
+from nisar_hazard_watch.services.daily_limits import DailyLimits
 from nisar_hazard_watch.services.exploration_service import ExplorationService
+from nisar_hazard_watch.utils.client_hash import hash_client_key
 from tests.factories import QADIRABAD_LAT, QADIRABAD_LON, make_job, make_plan
 from tests.unit.services.conftest import (
     DEADLINE_SECONDS,
@@ -57,6 +61,9 @@ SMALL_POLYGON = {
 Factory = Callable[..., ExplorationService]
 UNKNOWN_SCIENCE_STATUS = "mystery"
 GRID_QUALITY = {"gridWidth": 96, "gridHeight": 96, "postingMeters": [40.0, 40.0]}
+CLIENT = "203.0.113.7"
+ONE_RUN_A_DAY = 1
+APP_DAILY_LIMIT = 10
 
 
 def _request(**overrides: object) -> ExplorationRequest:
@@ -1089,3 +1096,99 @@ async def test_a_cached_answer_keeps_a_context_that_was_already_available(
     assert cached.result.fire_context is not None
     assert cached.result.fire_context.detections == 3
     assert len(fire.plans) == 1
+
+
+def _one_run_a_day(repository: SqlJobRepository, clock: ManualClock) -> DailyLimits:
+    return DailyLimits(
+        repository=repository,
+        app_limit=APP_DAILY_LIMIT,
+        client_limit=ONE_RUN_A_DAY,
+        clock=clock,
+    )
+
+
+async def test_a_client_over_its_daily_limit_is_refused_before_anything_is_submitted(
+    make_service: Factory, runner: ScriptedRunner, repository: SqlJobRepository, clock: ManualClock
+) -> None:
+    # Arrange
+    service = make_service(limits=_one_run_a_day(repository=repository, clock=clock))
+    await service.create(request=_request(), client=CLIENT)
+
+    # Act / Assert
+    with pytest.raises(DailyLimitReachedError):
+        await service.create(request=_request(lens=Lens.VEGETATION_DISTURBANCE), client=CLIENT)
+    assert len(runner.submissions) == 1
+
+
+async def test_cached_answers_never_spend_the_daily_allowance(
+    make_service: Factory, runner: ScriptedRunner, repository: SqlJobRepository, clock: ManualClock
+) -> None:
+    # Arrange
+    runner.submit_ticket = RunnerTicket(
+        run_id="run-1", state=RunnerState.SUCCEEDED, result=runner_result()
+    )
+    service = make_service(limits=_one_run_a_day(repository=repository, clock=clock))
+    first, _ = await service.create(request=_request(), client=CLIENT)
+
+    # Act
+    again, again_final = await service.create(request=_request(), client=CLIENT)
+
+    # Assert
+    assert again_final
+    assert again.cache is CacheState.HIT
+    assert again.id == first.id
+    assert len(runner.submissions) == 1
+
+
+async def test_a_run_the_gateway_answered_from_its_cache_does_not_spend_the_allowance(
+    make_service: Factory, runner: ScriptedRunner, repository: SqlJobRepository, clock: ManualClock
+) -> None:
+    # Arrange
+    runner.submit_ticket = RunnerTicket(
+        run_id="run-1", state=RunnerState.SUCCEEDED, cached=True, result=runner_result()
+    )
+    service = make_service(limits=_one_run_a_day(repository=repository, clock=clock))
+    cached, _ = await service.create(request=_request(), client=CLIENT)
+
+    # Act
+    other, _ = await service.create(
+        request=_request(lens=Lens.VEGETATION_DISTURBANCE), client=CLIENT
+    )
+
+    # Assert
+    stored = await repository.get(job_id=cached.id)
+    assert stored is not None
+    assert stored.counts_toward_limits is False
+    assert other.id != cached.id
+    assert len(runner.submissions) == 2
+
+
+async def test_the_job_remembers_a_digest_of_the_client_and_never_its_address(
+    make_service: Factory, repository: SqlJobRepository
+) -> None:
+    # Arrange
+    service = make_service()
+
+    # Act
+    view, _ = await service.create(request=_request(), client=CLIENT)
+
+    # Assert
+    stored = await repository.get(job_id=view.id)
+    assert stored is not None
+    assert stored.client_key == hash_client_key(client=CLIENT)
+    assert CLIENT not in stored.model_dump_json()
+
+
+async def test_a_regional_analysis_also_spends_the_allowance_of_its_client(
+    make_service: Factory, runner: ScriptedRunner, repository: SqlJobRepository, clock: ManualClock
+) -> None:
+    # Arrange
+    service = make_service(limits=_one_run_a_day(repository=repository, clock=clock))
+    parent, _ = await service.create(request=_request(), client=CLIENT)
+    _succeeded(runner)
+    await service.get(exploration_id=parent.id)
+
+    # Act / Assert
+    with pytest.raises(DailyLimitReachedError):
+        await service.create_analysis(exploration_id=parent.id, client=CLIENT)
+    assert len(runner.submissions) == 1
